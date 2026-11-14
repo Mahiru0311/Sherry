@@ -28,15 +28,15 @@ struct SherryLyricMatchEvaluation: Comparable, Equatable {
 
     /// 字典序：标题 → 歌手 → 专辑 → 时长 → 逐字。越 "小" 越好。
     static func < (lhs: Self, rhs: Self) -> Bool {
-        if lhs.titleMatches != rhs.titleMatches { return !lhs.titleMatches }
-        if lhs.artistsMatch != rhs.artistsMatch { return !lhs.artistsMatch }
-        if lhs.albumMatches != rhs.albumMatches { return !lhs.albumMatches }
+        if lhs.titleMatches != rhs.titleMatches { return lhs.titleMatches }
+        if lhs.artistsMatch != rhs.artistsMatch { return lhs.artistsMatch }
+        if lhs.albumMatches != rhs.albumMatches { return lhs.albumMatches }
         let lhsDurationRank = lhs.durationErrorMs <= SherryLyricsMatcher.perfectDurationToleranceMs
         ? 0 : lhs.durationErrorMs
         let rhsDurationRank = rhs.durationErrorMs <= SherryLyricsMatcher.perfectDurationToleranceMs
         ? 0 : rhs.durationErrorMs
-        if lhsDurationRank != rhsDurationRank { return lhsDurationRank > rhsDurationRank }
-        if lhs.isWordSynced != rhs.isWordSynced { return !lhs.isWordSynced }
+        if lhsDurationRank != rhsDurationRank { return lhsDurationRank < rhsDurationRank }
+        if lhs.isWordSynced != rhs.isWordSynced { return lhs.isWordSynced }
         return false
     }
 
@@ -45,6 +45,31 @@ struct SherryLyricMatchEvaluation: Comparable, Equatable {
         titleMatches && artistsMatch && albumMatches
         && durationErrorMs <= SherryLyricsMatcher.perfectDurationToleranceMs
         && isWordSynced
+    }
+
+    /// Service 的统一打分入口：按"想要的"与"候选的"元数据打分。
+    /// 歌手数组按 "|" 拼回字符串，复用 artistsMatch 的拆分逻辑。
+    static func evaluate(
+        wantedTitle: String, wantedArtists: [String],
+        wantedAlbum: String?, wantedDurationMs: Int?,
+        candidateTitle: String, candidateArtists: [String],
+        candidateAlbum: String?, candidateDurationMs: Int?,
+        isWordSynced: Bool
+    ) -> SherryLyricMatchEvaluation {
+        let need = SherryLyricNeed(
+            title: wantedTitle,
+            artist: wantedArtists.joined(separator: "|"),
+            durationMs: wantedDurationMs,
+            album: wantedAlbum
+        )
+        return SherryLyricsMatcher.evaluateCandidate(
+            title: candidateTitle,
+            artist: candidateArtists.joined(separator: "|"),
+            album: candidateAlbum,
+            durationMs: candidateDurationMs,
+            need: need,
+            hasWordTimings: isWordSynced
+        )
     }
 }
 
@@ -133,42 +158,31 @@ enum SherryLyricsMatcher {
     )
     }
 
-    /// 酷狗候选里挑最好的：只接受标题对得上的；完美匹配直接取，否则取字典序最小。
-    static func bestKugouCandidate(
-    _ candidates: [SherryKugouLyricCandidate], need: SherryLyricNeed
-) -> SherryKugouLyricCandidate? {
-        let scored = candidates.compactMap { candidate -> (candidate: SherryKugouLyricCandidate, evaluation: SherryLyricMatchEvaluation)? in
-            guard let title = candidate.title, titlesMatch(title, need.title) else { return nil}
-            let evaluation = evaluateCandidate(
-            title: title,
-            artist: candidate.artist ?? "",
-            album: candidate.album,
-            durationMs: candidate.durationMs,
-            need: need,
-            hasWordTimings: false
-        )
-            return (candidate, evaluation)
-        }
-        return scored.min(by: { $0.evaluation < $1.evaluation})?.candidate
-    }
-
-    /// LRCLIB 搜索结果里挑最好的：同上，但逐字参与打分。
+    /// LRCLIB /api/search 结果里挑最好的，返回下标；没有标题匹配的返回 nil。
+    /// 搜索本身已按歌手过滤，这里只按标题与时长打分（逐字参与打分）。
     static func bestLRCLIBMatch(
-    _ matches: [SherryLRCLIBSearchResult], need: SherryLyricNeed
-) -> SherryLRCLIBSearchResult? {
-        let scored = matches.compactMap { match -> (match: SherryLRCLIBSearchResult, evaluation: SherryLyricMatchEvaluation)? in
-            guard titlesMatch(match.trackName, need.title) else { return nil}
+        from tuples: [(trackName: String?, durationSeconds: Double?, hasSyncedLyrics: Bool)],
+        title: String, durationMs: Int?
+    ) -> Int? {
+        let need = SherryLyricNeed(title: title, artist: "", durationMs: durationMs, album: nil)
+        var bestIndex: Int?
+        var bestEvaluation: SherryLyricMatchEvaluation?
+        for (index, tuple) in tuples.enumerated() {
+            guard let trackName = tuple.trackName, titlesMatch(trackName, title) else { continue }
             let evaluation = evaluateCandidate(
-            title: match.trackName,
-            artist: match.artistName,
-            album: match.albumName,
-            durationMs: match.durationMs,
-            need: need,
-            hasWordTimings: match.hasSyncedLyrics
-        )
-            return (match, evaluation)
+                title: trackName,
+                artist: "",
+                album: nil,
+                durationMs: tuple.durationSeconds.map { Int(($0 * 1000).rounded()) },
+                need: need,
+                hasWordTimings: tuple.hasSyncedLyrics
+            )
+            if bestEvaluation == nil || evaluation < bestEvaluation! {
+                bestEvaluation = evaluation
+                bestIndex = index
+            }
         }
-        return scored.min(by: { $0.evaluation < $1.evaluation})?.match
+        return bestIndex
     }
 
     // MARK: - 内部工具

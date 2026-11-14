@@ -162,7 +162,7 @@ actor SherryLyricsService {
                     candidateTitle: rhs.title, candidateArtists: rhs.artists,
                     candidateAlbum: rhs.album, candidateDurationMs: rhs.durationMs, isWordSynced: rhs.hasKRC
                 )
-                return left == right ? false : left > right
+                return left == right ? false : left < right
             }
             for candidate in ranked.prefix(3) {
                 guard let doc = await SherryKugouLyrics.document(for: candidate, wantedDurationMs: durationMs),
@@ -180,7 +180,7 @@ actor SherryLyricsService {
                     "歌词候选：酷狗 id=\(candidate.id) 标题=\(doc.title ?? candidate.title) 歌手=\(doc.artists.joined(separator: "/")) 时长差=\(evaluation.durationErrorMs == .max ? -1 : evaluation.durationErrorMs)ms 逐字=\(evaluation.isWordSynced ? "是" : "否") 标题匹配=\(evaluation.titleMatches ? "是" : "否")",
                     level: .debug
                 )
-                if best == nil || best!.evaluation < evaluation {
+                if best == nil || evaluation < best!.evaluation {
                     best = (doc, evaluation)
                 }
                 if evaluation.isPerfect { break }
