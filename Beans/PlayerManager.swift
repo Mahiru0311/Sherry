@@ -112,6 +112,11 @@ final class PlayerManager: NSObject, ObservableObject {
     @Published private(set) var listeningDuration: TimeInterval = 0
     /// 每次用户主动拖动进度或点击歌词都会递增，歌词视图据此立即重新定位。
     @Published private(set) var seekRevision = 0
+    /// 歌词修订代次：预取完成或版本校验换掉歌词后 +1，PlayerView 据此从缓存刷新歌词。
+    @Published private(set) var lyricRevision = 0
+    /// 歌词版本校验已检查过的签名：identityKey -> 音频时长（取整秒）。
+    /// coco203 是酷狗专版，没有第三方音源，签名只含时长。
+    private var lyricVersionCheckSignatures: [String: String] = [:]
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -761,6 +766,10 @@ final class PlayerManager: NSObject, ObservableObject {
             return
         }
         Task {
+            // 歌词与音频地址并行解析；歌词失败静默（PlayerView 仍会按原逻辑再取一次）
+            Task { [weak self] in
+                await self?.prefetchLyrics(for: song, generation: generation)
+            }
             var urlString: String?
             let quality = forceKugouStandard ? CoAudioQuality.standard : NetworkAudioQuality.officialPreferred
             for attempt in 0..<3 {
@@ -805,6 +814,130 @@ final class PlayerManager: NSObject, ObservableObject {
         }
     }
 
+
+    // MARK: - 歌词：预取 / 缓存 / 版本校验
+
+    /// 歌词缓存键（与 PlayerView.loadLyrics 共用）：酷狗 hash，缺失时退回 identityKey。
+    static func lyricCacheKey(for song: Song) -> String {
+        "kugou:\(song.kugouHash ?? song.identityKey)"
+    }
+
+    /// 读 LyricsCache（UserDefaults，14 天）并解析；未命中或解析为空返回 nil。
+    /// 预取与版本校验都复用这份缓存，不另建内存缓存。
+    func cachedLyrics(for song: Song) -> [LyricLine]? {
+        guard let cached = LyricsCache.shared.value(for: Self.lyricCacheKey(for: song)) else { return nil }
+        let lines = LyricParser.parse(
+            cached.lyric,
+            translationRaw: cached.translation,
+            wordRaw: cached.wordTiming,
+            wordFormat: cached.wordFormat
+        )
+        return lines.isEmpty ? nil : lines
+    }
+
+    /// 播放器内统一的歌词抓取（缓存优先，否则走酷狗接口并写缓存），供预取与 PlayerView 共用。
+    func fetchLyrics(for song: Song) async -> [LyricLine] {
+        if let cached = cachedLyrics(for: song) { return cached }
+        guard song.source == .kugou, let hash = song.kugouHash else { return [] }
+        let payload = await KugouMusicAPI.shared.lyricPayload(
+            hash: hash,
+            duration: song.duration,
+            keyword: "\(song.name) \(song.artists)"
+        )
+        let lines = LyricParser.parse(payload.lrc, wordRaw: payload.krc, wordFormat: .kugouKRC)
+        if !payload.lrc.isEmpty {
+            LyricsCache.shared.save(lyric: payload.lrc, translation: nil, wordTiming: payload.krc, wordFormat: .kugouKRC, for: Self.lyricCacheKey(for: song))
+        }
+        return lines
+    }
+
+    /// 与音频地址解析并行预取歌词；切歌后旧任务的结果会被代次丢弃。
+    private func prefetchLyrics(for song: Song, generation: Int) async {
+        guard cachedLyrics(for: song) == nil else { return }
+        let lines = await fetchLyrics(for: song)
+        await MainActor.run {
+            guard generation == self.loadGeneration, !lines.isEmpty else { return }
+            self.lyricRevision += 1
+            self.maybeCheckLyricVersion()
+        }
+    }
+
+    /// 歌词版本校验：歌词末行与音频实际时长差 > 5s 时，按歌名 + 歌手 + 时长重取一次
+    /// 歌词（LRCLIB 优先，其次酷狗内部重搜），命中更匹配的版本才替换。
+    /// 同一首歌同一音频时长只校验一次；预取完成、播放器建立、音频实际时长到达时
+    /// 各触发一次（签名去重）。coco203 是酷狗专版，没有第三方音源，不做第三方触发。
+    func maybeCheckLyricVersion() {
+        guard let song = currentSong,
+              let cached = cachedLyrics(for: song), !cached.isEmpty else { return }
+        let audioDuration = duration
+        guard audioDuration > 0 else { return }
+        let signature = "\(Int(audioDuration))"
+        guard lyricVersionCheckSignatures[song.identityKey] != signature else { return }
+        lyricVersionCheckSignatures[song.identityKey] = signature
+        let lastLyricTime = cached.last?.time ?? 0
+        guard abs(lastLyricTime - audioDuration) > 5 else { return }
+        CoLogger.shared.log("歌词版本校验：\(song.name) - \(song.artists)｜歌词末行=\(String(format: "%.1f", lastLyricTime))s 音频时长=\(String(format: "%.1f", audioDuration))s 触发重取", level: .info)
+        Task { [weak self] in
+            guard let self else { return }
+            guard let better = await Self.refetchLyricsForVersionCheck(song: song, audioDuration: audioDuration) else { return }
+            await MainActor.run {
+                guard self.currentSong?.identityKey == song.identityKey else { return }
+                self.lyricRevision += 1
+                CoLogger.shared.log("歌词版本校验：已替换为更匹配的版本：\(song.name)", level: .info)
+            }
+        }
+    }
+
+    private static func refetchLyricsForVersionCheck(song: Song, audioDuration: Double) async -> [LyricLine]? {
+        // 1) LRCLIB：按歌名 + 歌手 + 时长精确匹配（行级歌词，无逐字时间）
+        if let lines = await fetchLyricsFromLRCLIB(song: song, audioDuration: audioDuration) {
+            return lines
+        }
+        // 2) 酷狗内部重搜：按歌名 + 歌手 + 时长再找一次候选
+        guard let payload = await KugouMusicAPI.shared.lyricByKeyword(
+            keyword: ([song.name, song.artists].filter { !$0.isEmpty }).joined(separator: " "),
+            duration: audioDuration
+        ) else { return nil }
+        let lines = LyricParser.parse(payload.lrc, wordRaw: payload.krc, wordFormat: .kugouKRC)
+        guard let last = lines.last?.time, abs(last - audioDuration) <= 5 else { return nil }
+        if !payload.lrc.isEmpty {
+            LyricsCache.shared.save(lyric: payload.lrc, translation: nil, wordTiming: payload.krc, wordFormat: .kugouKRC, for: lyricCacheKey(for: song))
+        }
+        return lines
+    }
+
+    private static func fetchLyricsFromLRCLIB(song: Song, audioDuration: Double) async -> [LyricLine]? {
+        var components = URLComponents(string: "https://lrclib.net/api/get")!
+        var items = [
+            URLQueryItem(name: "artist_name", value: song.artists),
+            URLQueryItem(name: "track_name", value: song.name),
+            URLQueryItem(name: "duration", value: String(Int(audioDuration.rounded()))),
+        ]
+        if !song.album.isEmpty {
+            items.append(URLQueryItem(name: "album_name", value: song.album))
+        }
+        components.queryItems = items
+        guard let url = components.url else { return nil }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let synced = json["syncedLyrics"] as? String, !synced.isEmpty else {
+                CoLogger.shared.log("歌词版本校验：LRCLIB 无匹配：\(song.name)", level: .debug)
+                return nil
+            }
+            let lines = LyricParser.parse(synced)
+            guard let last = lines.last?.time, abs(last - audioDuration) <= 5 else {
+                CoLogger.shared.log("歌词版本校验：LRCLIB 候选仍不匹配（末行 \(String(format: "%.1f", lines.last?.time ?? 0))s），放弃", level: .debug)
+                return nil
+            }
+            LyricsCache.shared.save(lyric: synced, translation: nil, wordTiming: nil, wordFormat: nil, for: lyricCacheKey(for: song))
+            return lines
+        } catch {
+            CoLogger.shared.log("歌词版本校验：LRCLIB 请求失败：\(error.localizedDescription)", level: .debug)
+            return nil
+        }
+    }
 
     /// 在网易云按 歌名+歌手 匹配同名歌曲（QQ vkey 失败时的免费播放兜底）
     /// 仅在高音质地址已经交给 AVPlayer 但实际无法打开时回退标准音质。
@@ -1061,6 +1194,8 @@ final class PlayerManager: NSObject, ObservableObject {
                 let seconds = itemDuration.seconds
                 if seconds.isFinite, abs(seconds - self.duration) > 0.25 {
                     self.duration = seconds
+                    // 音频实际时长已知后，校验歌词版本是否与该音频匹配
+                    self.maybeCheckLyricVersion()
                 }
             }
             let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
@@ -1093,6 +1228,8 @@ final class PlayerManager: NSObject, ObservableObject {
             if self.retryKugouAtStandardIfNeeded(error: item.error) { return }
             self.finishUnrecoverablePlaybackFailure(song: loadedSong, reason: "播放中断失败")
         }
+        // 播放器已建立：用当前已知时长（元数据或实际时长）做一次歌词版本校验
+        maybeCheckLyricVersion()
         updateNowPlaying()
     }
 

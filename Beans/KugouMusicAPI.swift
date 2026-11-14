@@ -1668,32 +1668,41 @@ final class KugouMusicAPI {
         guard let sjson = try? await getJSON(search.url!, ua: Self.browserUA),
               let first = (sjson["candidates"] as? [[String: Any]])?.first,
               let id = first["id"], let accessKey = first["accesskey"] else { return LyricPayload(lrc: "", krc: nil) }
-        func download(_ format: String) async -> Data? {
-            var request = URLComponents(string: "https://lyrics.kugou.com/download")!
-            request.queryItems = [
-                URLQueryItem(name: "ver", value: "1"),
-                URLQueryItem(name: "client", value: "pc"),
-                URLQueryItem(name: "id", value: "\(id)"),
-                URLQueryItem(name: "accesskey", value: "\(accessKey)"),
-                URLQueryItem(name: "fmt", value: format),
-                URLQueryItem(name: "charset", value: "utf8"),
-            ]
-            guard let djson = try? await getJSON(request.url!, ua: Self.browserUA),
-                  let content = djson["content"] as? String,
-                  let data = Data(base64Encoded: content.replacingOccurrences(of: "\n", with: "")) else { return nil }
-            return data
-        }
+        return await lyricPayloadFromCandidate(first, id: id, accessKey: accessKey)
+    }
+
+    /// 酷狗歌词重搜（版本校验用）：按歌名 + 歌手 + 时长搜索，不依赖 hash，
+    /// 取首个候选；调用方校验末行时间与音频时长是否匹配（±5s）才采用。
+    func lyricByKeyword(keyword: String, duration: TimeInterval) async -> LyricPayload? {
+        guard !keyword.isEmpty else { return nil }
+        var search = URLComponents(string: "https://lyrics.kugou.com/search")!
+        search.queryItems = [
+            URLQueryItem(name: "ver", value: "1"),
+            URLQueryItem(name: "man", value: "yes"),
+            URLQueryItem(name: "client", value: "pc"),
+            URLQueryItem(name: "keyword", value: keyword),
+            URLQueryItem(name: "timelength", value: "\(Int(duration * 1000))"),
+            URLQueryItem(name: "duration", value: "\(Int(duration * 1000))"),
+            URLQueryItem(name: "lrctxt", value: "1"),
+        ]
+        guard let sjson = try? await getJSON(search.url!, ua: Self.browserUA),
+              let first = (sjson["candidates"] as? [[String: Any]])?.first,
+              let id = first["id"], let accessKey = first["accesskey"] else { return nil }
+        return await lyricPayloadFromCandidate(first, id: id, accessKey: accessKey)
+    }
+
+    private func lyricPayloadFromCandidate(_ candidate: [String: Any], id: Any, accessKey: Any) async -> LyricPayload {
         func integer(_ value: Any?) -> Int {
             if let value = value as? Int { return value }
             if let value = value as? NSNumber { return value.intValue }
             return Int(String(describing: value ?? "")) ?? 0
         }
-        let isKRC = integer(first["krctype"]) == 1 && integer(first["contenttype"]) != 1
-        let raw = await download(isKRC ? "krc" : "lrc")
+        let isKRC = integer(candidate["krctype"]) == 1 && integer(candidate["contenttype"]) != 1
+        let raw = await downloadLyricData(id: id, accessKey: accessKey, format: isKRC ? "krc" : "lrc")
         if isKRC, let raw, let decoded = Self.decodeKRC(raw) {
             return LyricPayload(lrc: decoded.lrc, krc: decoded.krc)
         }
-        if isKRC, let lrcData = await download("lrc"),
+        if isKRC, let lrcData = await downloadLyricData(id: id, accessKey: accessKey, format: "lrc"),
            let lrc = String(data: lrcData, encoding: .utf8), !lrc.isEmpty {
             return LyricPayload(lrc: lrc, krc: nil)
         }
@@ -1701,8 +1710,31 @@ final class KugouMusicAPI {
         return LyricPayload(lrc: lrc, krc: nil)
     }
 
+    private func downloadLyricData(id: Any, accessKey: Any, format: String) async -> Data? {
+        var request = URLComponents(string: "https://lyrics.kugou.com/download")!
+        request.queryItems = [
+            URLQueryItem(name: "ver", value: "1"),
+            URLQueryItem(name: "client", value: "pc"),
+            URLQueryItem(name: "id", value: "\(id)"),
+            URLQueryItem(name: "accesskey", value: "\(accessKey)"),
+            URLQueryItem(name: "fmt", value: format),
+            URLQueryItem(name: "charset", value: "utf8"),
+        ]
+        guard let djson = try? await getJSON(request.url!, ua: Self.browserUA),
+              let content = djson["content"] as? String,
+              let data = Data(base64Encoded: content.replacingOccurrences(of: "\n", with: "")) else { return nil }
+        return data
+    }
+
     private static func decodeKRC(_ data: Data) -> (lrc: String, krc: String?)? {
-        guard data.count > 4 else { return nil }
+        guard data.count > 4 else {
+            CoLogger.shared.log("KRC 解码失败：数据过短（\(data.count) 字节）", level: .debug)
+            return nil
+        }
+        guard data.prefix(4) == Data("krc1".utf8) else {
+            CoLogger.shared.log("KRC 解码失败：缺少 krc1 魔数", level: .debug)
+            return nil
+        }
         let key: [UInt8] = [0x40, 0x47, 0x61, 0x77, 0x5e, 0x32, 0x74, 0x47,
                             0x51, 0x36, 0x31, 0x2d, 0xce, 0xd2, 0x6e, 0x69]
         var encrypted = Array(data.dropFirst(4))
