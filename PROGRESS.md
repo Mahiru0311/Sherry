@@ -24,8 +24,8 @@ Windows 已执行 Swift tree-sitter 语法检查。它只能检查语法结构�
 
 1. 使用包含 iOS 26.1 SDK 的 Xcode，安装 XcodeGen。
 2. 在工程目录运行 `xcodegen generate`。
-3. 打开 Beans.xcodeproj，选择 Beans scheme、iPhone 模拟器，先 Build，再运行 BeansTests。
-4. 真机安装时给 Beans 和 BeansLiveActivity 配置个人 Team，使用相同 bundle ID 前缀。CiliCiliKit 随 App 签名。
+3. 打开 Sherry.xcodeproj，选择 Sherry scheme、iPhone 模拟器，先 Build，再运行 SherryTests。
+4. 真机安装时给 Sherry 和 SherryLiveActivity 配置个人 Team，使用相同 bundle ID 前缀。CiliCiliKit 随 App 签名。
 5. 锁屏动态封面必须在支持的系统和设备上确认；系统可能因低电量、减少动态效果等设置使用静态封面。
 
 工程仍保留原基线的版本号 1.8.1（19）和 iOS 26.1 部署目标。这是开发重建版本，不应标成已经复原且验收的 2.0.3。

@@ -66,7 +66,7 @@ struct FoliaSettingsView: View {
                         }
                     }
                 }
-                card("Co 液态外观") {
+                card("Sherry 液态外观") {
                     Toggle("关闭液态模式", isOn: $disableLiquidGlass)
                     Picker("全局 UI 风格", selection: Binding(get: { theme.uiStyle }, set: { theme.setUIStyle($0) })) {
                         ForEach(CoUIStyle.allCases, id: \.self) { style in
@@ -78,7 +78,7 @@ struct FoliaSettingsView: View {
                         set: { theme.setLiquidGlassColor("#" + UIColor($0).hexString) }
                     ), supportsOpacity: false)
                     Button("恢复清透颜色") { theme.clearLiquidGlassColor() }
-                    Text("与 Co 设置共用。")
+                    Text("与 Sherry 设置共用。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }

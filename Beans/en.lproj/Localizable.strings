@@ -5,8 +5,8 @@
 "；合计 \\(unique.count) 首" = "; total \\(unique.count) songs";
 "· “酷狗音乐”、酷狗图形标识及相关音乐内容的著作权、商标权或其他权利归酷狗音乐及其相关权利方所有。" = "· Kugou Music, its logo, and related music content belong to Kugou Music and its respective rights holders.";
 "· 音乐 API 来自于 GitHub 开源项目（非官方版 API），本软件不提供任何音频存储服务，如需下载音频，请支持正版！" = "· Music APIs come from open-source GitHub projects and are unofficial. This app does not store audio. Please support licensed music.";
-"· 音乐版权归各网站所有，本站不承担任何法律责任和连带责任。" = "· Music copyrights belong to their respective platforms. Co assumes no related legal liability.";
-"· Co 只用作个人学习研究，禁止用于商业及非法用途，如产生法律纠纷与本人无关。" = "· Co is for personal learning and research only. Commercial or illegal use is prohibited.";
+"· 音乐版权归各网站所有，本站不承担任何法律责任和连带责任。" = "· Music copyrights belong to their respective platforms. Sherry assumes no related legal liability.";
+"· Sherry 只用作个人学习研究，禁止用于商业及非法用途，如产生法律纠纷与本人无关。" = "· Sherry is for personal learning and research only. Commercial or illegal use is prohibited.";
 "“酷狗音乐”及其名称、图形和商业标识归酷狗音乐及相关权利方所有。酷狗音乐享有对其平台授权音乐的版权，请勿随意下载、复制版权内容。具体内容请参考酷狗音乐用户协议。" = "Kugou Music, its name, graphics, and commercial marks belong to Kugou Music and its respective rights holders. Please follow the Kugou Music user agreement.";
 "“网易云”、“网易云音乐”等文字、图形和商业标识，其著作权或商标权归网易所有。网易云音乐享有对其平台授权音乐的版权，请勿随意下载、复制版权内容。具体内容请参考网易云音乐用户协议。" = "NetEase Cloud Music names, graphics, and commercial marks belong to NetEase. Please follow the NetEase Cloud Music user agreement.";
 "“QQ”、“QQ音乐”及企鹅形象等文字、图形和商业标识，其著作权或商标权归腾讯公司所有。QQ音乐享有对其平台授权音乐的版权，请勿随意下载、复制版权内容。具体内容请参考QQ音乐用户协议。" = "QQ, QQ Music, the penguin image, and related marks belong to Tencent. Please follow the QQ Music user agreement.";
@@ -212,9 +212,7 @@
 "第三方音源准备 QQ CDN 备用节点：\\(rawURL.host ?? " = "Log entry";
 "点击顶部中间正在播放的标题，可打开更多设置" = "Tap the centered Now Playing title at the top to open more settings.";
 "点击封面区域返回歌曲页面" = "Tap the cover area to return to the song page";
-"点击收起赞助信息" = "Tap to collapse sponsor info";
 "点击跳转 Telegram" = "Open Telegram";
-"点击展开赞助信息" = "Tap to view sponsor info";
 "点击左上角封面返回专辑视图" = "Tap the top-left cover to return to album view";
 "电脑浏览器打开 https://y.qq.com 登录 QQ 后，按 F12 → Network → 刷新页面，点任意请求，复制 Request Headers 里的整段 Cookie 粘贴到下方" = "Log message";
 "电子" = "Electronic";
@@ -321,7 +319,7 @@
 "琥珀暖金" = "Warm Amber Gold";
 "华语" = "Chinese Music";
 "怀旧" = "Nostalgic";
-"欢迎使用 Co" = "Welcome to Co";
+"欢迎使用 Sherry" = "Welcome to Sherry";
 "恢复" = "Restore ";
 "恢复播放页控件颜色默认" = "Restore player control colors";
 "恢复当前" = "Restore Current";
@@ -375,7 +373,7 @@
 "进度条颜色" = "Progress Bar Color";
 "进度条样式" = "Progress Bar Style";
 "进入 Apple Music 悬浮调试" = "Open Apple Music Floating Adjuster";
-"进入软件" = "Enter Co";
+"进入软件" = "Enter Sherry";
 "经典" = "Classic";
 "经典封面" = "Classic Cover";
 "经典圆形" = "Classic Circle";
@@ -485,7 +483,6 @@
 "请使用酷狗音乐 App 扫码" = "App";
 "请使用酷狗音乐 App 扫码。登录成功后会保存移动端 token、设备 mid 和 dfid，用于同步云端歌单。" = "Log message";
 "请使用网易云音乐 App 扫码" = "App";
-"请使用微信扫描上方二维码完成赞助。" = "Scan the QR code above with WeChat to sponsor.";
 "请输入：\\(confirmText)" = "Log entry";
 "请输入歌单名称" = "Enter a playlist name";
 "请先登录 QQ 音乐后再创建歌单" = "Sign in to QQ Music before creating a playlist";
@@ -560,7 +557,7 @@
 "输入歌名后会同时搜索网易云、QQ音乐和酷狗音乐" = "Enter a song name to search NetEase Cloud Music, QQ Music, and Kugou Music together.";
 "输入歌名搜索" = "Search by song name";
 "输入歌名搜索，点击结果加入本地歌单" = "Search by song name, then tap a result to add it to the local playlist.";
-"输入后才会启用第三方音源。密钥只保存在本机，不会上传到 Co 服务器。" = "Third-party sources are enabled only after a key is entered. Keys are stored locally and never uploaded to the Co server.";
+"输入后才会启用第三方音源。密钥只保存在本机，不会上传到 Sherry 服务器。" = "Third-party sources are enabled only after a key is entered. Keys are stored locally and never uploaded to the Sherry server.";
 "数据解析失败" = "Failed";
 "数据解析失败：\\(snippet)" = "Log message \(snippet)";
 "刷新" = "Refresh";
@@ -770,7 +767,7 @@
 "音量条" = "Volume Bar";
 "音量条颜色" = "Volume Bar Color";
 "音频会话配置失败：\\(error.localizedDescription)" = "Log entry";
-"音源购买渠道非 Co 本人，价格便宜，可以自行前往支持。购买后获得的密钥仅属于你自己，请填写到上方输入框中使用。" = "Source keys are provided by an external channel and are not sold by Co. Purchased keys belong only to you. Enter your key above to use it.";
+"音源购买渠道非 Sherry 本人，价格便宜，可以自行前往支持。购买后获得的密钥仅属于你自己，请填写到上方输入框中使用。" = "Source keys are provided by an external channel and are not sold by Sherry. Purchased keys belong only to you. Enter your key above to use it.";
 "音质" = "Audio Quality";
 "隐藏顶部平台列表" = "Hide Top Platform List";
 "隐藏所有界面排序按钮" = "Hide Sort Buttons Everywhere";
@@ -810,7 +807,6 @@
 "暂无评论" = "No Comments";
 "暂无日志" = "No Logs";
 "暂无专辑" = "No album";
-"赞助人员" = "Sponsors";
 "早上好" = "Good morning";
 "粘贴Cookie" = "Paste Cookie";
 "展开全部（\\(min(visibleRankCount, 10))）" = "Expand All (\\(min(visibleRankCount, 10)))";
@@ -890,7 +886,6 @@
 "自定义时长" = "Custom";
 "自动" = "Automatic";
 "自动问候" = "Automatic Greeting";
-"自愿赞助" = "Voluntary Sponsorship";
 "最近播放" = "Recently Played";
 "最近播放 \\(player.history.count) 首" = "\\(player.history.count)";
 "最新评论" = "Comments";
@@ -922,12 +917,12 @@
 "备份音源密钥" = "Back Up Source Keys";
 "AVPlayer 准备播放：\\(currentSong?.name ?? " = "Log message";
 "AVPlayerItem 加载失败" = "AVPlayerItem failed to load";
-"Co · 仅供学习交流 · 音乐版权归各平台所有 · 酷狗音乐名称及图标归酷狗音乐 / 腾讯音乐娱乐相关权利方所有" = "Co - for learning and communication only. Music copyrights belong to their respective platforms.";
-"Co · 仅供学习交流，纯 AI 实现此应用" = "Co - for learning and communication only. Built with AI.";
-"Co 公告" = "Co Announcement";
-"Co 启动（版本 \\(Self.appVersion)）" = "Co started (version \\(Self.appVersion))";
-"Co 是一款聚合网易云音乐、QQ 音乐与酷狗音乐歌单同步能力的第三方音乐播放器客户端，仅供个人学习研究使用。" = "Co is a third-party music player for syncing NetEase Cloud Music, QQ Music, and Kugou playlists. For personal learning only.";
-"Co设置备份-\\(Self.backupDateString())" = "Co-\\(Self.backupDateString())";
+"Sherry · 仅供学习交流 · 音乐版权归各平台所有 · 酷狗音乐名称及图标归酷狗音乐 / 腾讯音乐娱乐相关权利方所有" = "Sherry - for learning and communication only. Music copyrights belong to their respective platforms.";
+"Sherry · 仅供学习交流，纯 AI 实现此应用" = "Sherry - for learning and communication only. Built with AI.";
+"Sherry 公告" = "Sherry Announcement";
+"Sherry 启动（版本 \\(Self.appVersion)）" = "Sherry started (version \\(Self.appVersion))";
+"Sherry 是一款酷狗音乐专版第三方音乐播放器客户端，仅供个人学习研究使用。" = "Sherry is a Kugou-only third-party music player. For personal learning only.";
+"Co设置备份-\\(Self.backupDateString())" = "Sherry-\\(Self.backupDateString())";
 "Cookie 格式或登录态无效，请确认已完整复制" = "Cookie format or sign-in state is invalid. Make sure the full Cookie was copied.";
 "DJ 节奏脉冲光效" = "DJ Beat Pulse";
 "iOS 26 原生液态玻璃 · 聚合网易云 / QQ / 酷狗\\n纯 SwiftUI · 完全开源" = "iOS 26 · / QQ / \\n SwiftUI ·";

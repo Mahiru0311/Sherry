@@ -1380,7 +1380,7 @@ struct PlayerView: View {
                     .font(CoFont.appFont(12, .semibold))
                     .foregroundStyle(palette.secondary)
                     .lineLimit(1)
-                Text(song?.album ?? "Co")
+                Text(song?.album ?? "Sherry")
                     .font(CoFont.appFont(10))
                     .foregroundStyle(palette.secondary.opacity(0.85))
                     .lineLimit(1)

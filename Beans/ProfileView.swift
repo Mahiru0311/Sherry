@@ -1115,7 +1115,7 @@ struct CoPlaylistEditSheet: View {
                         .buttonStyle(.plain)
                     }
                 }
-                Text("改名、改封面只在 Co 里生效，不会同步到酷狗官方 App（酷狗接口没有这个接口）。")
+                Text("改名、改封面只在 Sherry 里生效，不会同步到酷狗官方 App（酷狗接口没有这个接口）。")
                     .font(CoFont.appFont(12))
                     .foregroundStyle(Color.coComment)
                 Spacer()
@@ -1237,7 +1237,7 @@ struct CoMyPlaylistsSheet: View {
                 Button("创建") { Task { await createPlaylist() } }
                 Button("取消", role: .cancel) { pendingCoverImage = nil }
             } message: {
-                Text("新建的歌单会同步到酷狗音乐，创建后会出现在列表里。封面只在 Co 里生效，不会同步到酷狗官方 App。")
+                Text("新建的歌单会同步到酷狗音乐，创建后会出现在列表里。封面只在 Sherry 里生效，不会同步到酷狗官方 App。")
             }
             .sheet(isPresented: $showCreateCoverPicker) {
                 WallpaperImagePicker(
@@ -1741,7 +1741,7 @@ struct SettingsView: View {
             isPresented: $showExportBackup,
             document: backupDoc,
             contentType: .json,
-            defaultFilename: "Co设置备份-\(Self.backupDateString())"
+            defaultFilename: "Sherry设置备份-\(Self.backupDateString())"
         ) { result in
             switch result {
             case .success:
@@ -1858,7 +1858,7 @@ struct SettingsView: View {
         }
     }
 
-    private var showAppearanceSettings: Bool { settingsMatches("主题 外观 背景 壁纸 底栏 颜色 赞助 深色 深浅") }
+    private var showAppearanceSettings: Bool { settingsMatches("主题 外观 背景 壁纸 底栏 颜色 深色 深浅") }
     private var showPlaybackSettings: Bool { settingsMatches("播放 触感 锁屏 灵动岛") }
     private var showEqualizerSettings: Bool { settingsMatches("均衡器 音效") }
     private var showBackupSettings: Bool { settingsMatches("备份 恢复 导出 导入 缓存") }
@@ -2378,7 +2378,7 @@ struct SettingsView: View {
                         Text("液态容器颜色")
                             .font(CoFont.appFont(15))
                             .foregroundStyle(Color.coLabel)
-                        Text("只影响 Co 自定义液态容器，系统原生玻璃不变")
+                        Text("只影响 Sherry 自定义液态容器，系统原生玻璃不变")
                             .font(CoFont.appFont(11))
                             .foregroundStyle(Color.coComment)
                     }
@@ -2956,8 +2956,6 @@ struct SettingsView: View {
 
     private static func isAccountBackupKey(_ key: String) -> Bool {
         key == "co.user"
-            || key.hasPrefix("co.netease.")
-            || key.hasPrefix("co.qqmusic.")
             || key.hasPrefix("co.kugou.")
     }
 
@@ -3022,7 +3020,7 @@ struct SettingsView: View {
         }
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         payload["co.backup.meta"] = [
-            "app": "Co",
+            "app": "Sherry",
             "created": ISO8601DateFormatter().string(from: Date()),
             "version": version,
             "includedAccounts": includeAccounts,
@@ -3278,7 +3276,7 @@ struct SettingsView: View {
     private var runtimeVersionText: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-        return "Co \(version) (Build \(build))"
+        return "Sherry \(version) (Build \(build))"
     }
 
     private var runtimeScreenDimensions: String {

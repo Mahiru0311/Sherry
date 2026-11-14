@@ -1,20 +1,15 @@
-# Beans Music 🎵
+# Sherry 🎵
 
-> 一款基于 **iOS 26 原生液态玻璃（Liquid Glass）** 的第三方音乐播放器（最低支持 iOS 26.1），聚合网易云音乐、QQ 音乐与 CiliCili 哔哩哔哩界面，纯 SwiftUI 实现。
+> 一款基于 **iOS 26 原生液态玻璃（Liquid Glass）** 的第三方音乐播放器（最低支持 iOS 26.1），**酷狗音乐专版**，纯 SwiftUI 实现。
 > 本软件完全开源，仅供学习研究使用；组合发行版按 GPL-3.0-only 发布。
 
-[![GitHub Pages 预览](https://img.shields.io/badge/在线预览-GitHub%20Pages-blue)](https://xiaodou0416.github.io/Beans-Music/)
 [![License: GPL-3.0-only](https://img.shields.io/badge/License-GPL--3.0--only-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-iOS%2026.1%2B-orange)]()
 [![Swift](https://img.shields.io/badge/Swift-5-orange)]()
 
-**👀 在线预览（HTML 介绍页）：** https://xiaodou0416.github.io/Beans-Music/
+## 🧑‍💻 关于 Sherry
 
-## 🧑‍💻 关于作者
-
-- 作者本人**什么都不会**，连这篇介绍都是 **AI 写的** 🤡
-- 本软件由 **OpenAI Codex** 编程助手开发，从需求分析、UI 设计到代码实现全程由 AI 完成
-- **不喜勿喷**，纯新手小学生，欢迎温柔指教 🙏
+- Sherry 是 [Beans Music](https://github.com/XIaodou0416/Beans-Music) 的酷狗专版分支（Co 2.0.3）：只走酷狗音乐，带逐字歌词同步、灵动岛与自适应音质
 - 组合发行版按 GPL-3.0-only 发布；Beans 原有 MIT 版权声明及第三方许可证仍按 `THIRD_PARTY_NOTICES.md` 保留
 
 ## 📱 界面预览
@@ -80,33 +75,31 @@
 
 ---
 
-## 🚀 双平台聚合，一个 App 听遍网易云 + QQ 音乐
+## 🚀 酷狗专版，一个 App 听酷狗
 
-- 网易云 / QQ 音乐一键切换：每日推荐、排行榜、推荐歌单、搜索、热门搜索全部跟随平台
-- 网易云：扫码登录 + 应用内网页登录，同步歌单、收藏、听歌排行与 VIP / SVIP 标识
-- QQ 音乐：扫码授权 + 网页登录 / Cookie 导入，同步歌单与 VIP 标识
-- 双平台歌曲评论区、歌词、歌手主页互通
+- 酷狗音乐专版：每日推荐、排行榜、推荐歌单、搜索、热门搜索全部走酷狗
+- 酷狗：扫码登录 + 应用内网页登录 / Cookie 导入，同步歌单、收藏与 VIP 标识
+- 酷狗歌曲评论区、KRC 逐字歌词、歌手主页
+- 歌词与音频并行预取，版本不对自动重取；支持本首歌单独偏移校正
 
 ## 🎧 播放器：从封面里长出来的界面
 
 - 动态封面取色：背景渐变、进度条、播放按钮、功能按钮、歌词高亮全部实时跟随专辑封面主色，切歌平滑过渡
 - 抖音式上下滑动切歌，过渡动画丝滑；左右滑动也可切换
 - 封面点击切换歌词视图（封面飞入左上角动画）、圆形封面模式 + 自动旋转
-- 底部指示线上滑呼出评论区（网易云 + QQ 评论）
+- 底部指示线上滑呼出评论区（酷狗评论）
 
 ## ⚡ 播放能力拉满
 
 - 5 档音质（标准 / 较高 / 极高 / 无损 / Hi-Res），无损与 Hi-Res 自动回落
-- 免费听歌开关（灰色 / VIP / 版权歌曲自动匹配第三方音源）
-- 第三方音源：内置聆澜 LX / CR / QT 三种预设，作为官方地址不可用时的备用来源
-- 歌曲下载（低质量 128k / 高质量 320k，存到文件 App）
+- 中途连续卡顿自动降档（Hi-Res→无损→极高→标准）
 - 锁屏控制、控制中心、后台播放、播放队列与插队、倍速（0.5x~2.0x）、循环模式、±15 秒、睡眠定时
-- 播放历史、网易云听歌排行（本周 / 所有时间）
+- 播放历史、本地常听排行（按真实播放次数）
 
 ## 📱 系统体验
 
 - iOS 26 原生液态玻璃（Liquid Glass）TabBar，与系统 App 一致
-- 首次进入 4 页引导（欢迎 / DIY 美化 / 双平台 / 免责确认）+ 版本更新说明弹窗 + 更新日志
+- 首次进入引导（欢迎 / DIY 美化 / 酷狗专版 / 免责确认）+ 版本更新说明弹窗 + 更新日志
 - 软件使用说明、深浅色自适应
 
 ---
@@ -123,15 +116,13 @@ Beans/
 ├── ProfileView.swift             我的（功能 / 听歌排行 / 使用说明 / 设置）
 ├── PlayerView.swift              播放器（动态取色 / 歌词 / 底部控制 / 设置）
 ├── PlayerManager.swift           播放核心（队列 / 倍速 / 定时 / 历史）
-├── LoginView.swift               网易云登录（扫码 + 网页登录）
-├── NetEaseWebLoginSheet.swift    网易云网页登录（WKWebView 读取 Cookie）
-├── QQMusicAPI.swift / QQMusicAuth.swift / QQWebLoginSheet.swift  QQ 音乐接入
-├── NetEaseAPI.swift / NetEaseCrypto.swift   网易云接口与加密（weapi / eapi）
+├── KugouMusicAPI.swift           酷狗接口（搜索 / 播放地址 / 歌词 KRC / 评论 / 登录）
+├── KugouMusicAuth.swift / KugouLoginSheet.swift   酷狗登录（扫码 + 网页登录）
+├── Folia/                        歌词舞台渲染（Classic / Still / 云阶 / 绘光 / 浮名）
 ├── AuthStore.swift / Models.swift   登录态与数据模型
 ├── Theme.swift / CoverPalette.swift   全局主题与封面取色
 ├── PlayerLayout.swift / PlayerAmbience.swift / DJVisualView.swift   布局与氛围
-├── DownloadManager.swift / UnblockService.swift / UnblockSourceStore.swift   下载与音源
-├── CommentsSheet.swift / ArtistHomeSheet.swift   评论与歌手主页
+├── ArtistHomeSheet.swift / CoHotCommentsSheet.swift   歌手主页与酷狗评论
 ├── Changelog.swift / Components.swift / SongCell.swift   日志与组件库
 └── Assets.xcassets                图标与资源
 ```
@@ -140,26 +131,26 @@ Beans/
 
 ## 🔨 构建
 
-GitHub Actions（`Build Unsigned IPA`）自动构建，产物保存在对应工作流运行的 Artifacts 中，不创建 GitHub Release。
+GitHub Actions（`Build Unsigned IPA`）自动构建：推送到 main 时构建并发布 Release；手动触发默认只构建不发布。
 
 本地构建（需要 Mac + Xcode 26）：
 
 ```bash
 brew install xcodegen
 xcodegen generate
-xcodebuild -project Beans.xcodeproj -scheme Beans -configuration Release \
+xcodebuild -project Sherry.xcodeproj -scheme Sherry -configuration Release \
   -sdk iphoneos -derivedDataPath build \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
 mkdir -p Payload
-cp -R build/Build/Products/Release-iphoneos/Beans.app Payload/
-ditto -c -k --sequesterRsrc --keepParent Payload Beans-unsigned.ipa
+cp -R build/Build/Products/Release-iphoneos/Sherry.app Payload/
+ditto -c -k --sequesterRsrc --keepParent Payload Sherry-unsigned.ipa
 ```
 
 ## 📲 安装
 
 未签名 IPA 需自行签名安装：Sideloadly / AltStore / 爱思助手，使用 Apple ID 签名（免费自签 7 天有效）。
 - 支持 iOS 26.1+
-- Bundle ID：`com.beans.app`
+- Bundle ID：`com.kugou.kugou1002`（与酷狗音乐官方 App 相同包名；两者不可共存，安装会互相覆盖）
 
 ---
 
@@ -168,8 +159,7 @@ ditto -c -k --sequesterRsrc --keepParent Payload Beans-unsigned.ipa
 - 本应用仅供个人学习研究使用，禁止用于商业及非法用途，如产生法律纠纷与作者无关
 - 音乐 API 来源于 GitHub 开源项目（非官方版 API），本软件不提供任何音频存储服务
 - 音乐版权归各平台所有，请支持正版；如需下载音频请在各平台官方渠道购买
-- “QQ”、“QQ音乐”及企鹅形象等文字、图形和商业标识，其著作权或商标权归腾讯公司所有
-- “网易云”、“网易云音乐”等文字、图形和商业标识，其著作权或商标权归网易公司所有
+- “酷狗音乐”等文字、图形和商业标识，其著作权或商标权归酷狗音乐 / 腾讯音乐娱乐相关权利方所有
 - 具体内容请参考各平台用户协议
 
 ## 📄 License

@@ -1,4 +1,4 @@
-name: Beans
+name: Sherry
 
 options:
   deploymentTarget:
@@ -9,7 +9,7 @@ settings:
     SWIFT_VERSION: "5.0"
 
 targets:
-  Beans:
+  Sherry:
     type: application
     platform: iOS
     deploymentTarget: "26.1"
@@ -22,25 +22,25 @@ targets:
       - Beans/Resources/SimpleIcons-LICENSE.txt
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.music.coco
+        PRODUCT_BUNDLE_IDENTIFIER: com.kugou.kugou1002
         DEAD_CODE_STRIPPING: YES
         DEPLOYMENT_POSTPROCESSING: YES
         STRIP_INSTALLED_PRODUCT: YES
         SWIFT_COMPILATION_MODE: wholemodule
         SWIFT_OPTIMIZATION_LEVEL: "-O"
-        MARKETING_VERSION: "2.0.3"
-        CURRENT_PROJECT_VERSION: "15"
+        MARKETING_VERSION: "2.1.0"
+        CURRENT_PROJECT_VERSION: "1"
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_OBJC_BRIDGING_HEADER: Beans/Beans-Bridging-Header.h
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: Beans/Beans.entitlements
     dependencies:
-      - target: BeansLiveActivity
+      - target: SherryLiveActivity
     info:
       path: Beans/Info.plist
       properties:
-        CFBundleDisplayName: Co
-        CFBundleName: Co
+        CFBundleDisplayName: Sherry
+        CFBundleName: Sherry
         LSRequiresIPhoneOS: true
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
@@ -71,7 +71,7 @@ targets:
                 UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).CarPlaySceneDelegate
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
-  BeansLiveActivity:
+  SherryLiveActivity:
     type: app-extension
     platform: iOS
     deploymentTarget: "26.1"
@@ -80,40 +80,41 @@ targets:
       - BeansLiveActivityShared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.music.coco.liveactivity
-        MARKETING_VERSION: "2.0.3"
-        CURRENT_PROJECT_VERSION: "15"
+        PRODUCT_BUNDLE_IDENTIFIER: com.kugou.kugou1002.liveactivity
+        MARKETING_VERSION: "2.1.0"
+        CURRENT_PROJECT_VERSION: "1"
         SKIP_INSTALL: YES
         APPLICATION_EXTENSION_API_ONLY: YES
     info:
       path: BeansLiveActivity/Info.plist
       properties:
-        CFBundleDisplayName: Co Now Playing
+        CFBundleDisplayName: Sherry Now Playing
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
-  BeansTests:
+  SherryTests:
     type: bundle.unit-test
     platform: iOS
     deploymentTarget: "26.1"
     sources:
       - BeansTests
     dependencies:
-      - target: Beans
+      - target: Sherry
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.music.coco.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.kugou.kugou1002.tests
+        MARKETING_VERSION: "2.1.0"
+        CURRENT_PROJECT_VERSION: "1"
 schemes:
-  Beans:
+  Sherry:
     build:
       targets:
-        Beans: all
+        Sherry: all
     run:
       config: Debug
     archive:
       config: Release
     test:
       targets:
-        - BeansTests
-
+        - SherryTests

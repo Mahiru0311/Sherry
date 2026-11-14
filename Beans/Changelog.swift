@@ -53,6 +53,26 @@ enum ChangelogStore {
 
     static let logs: [VersionLog] = [
         VersionLog(
+            id: "2.1.0",
+            version: "2.1.0",
+            title: "酷狗专版重制：歌词同步 v2",
+            notices: [
+                "本次更新基于 Co 2.0.3（酷狗专版）重制；旧 1.7.0 是基于 Beans 底构建的错误版本，请重新安装。",
+                "Bundle ID 已改为 com.kugou.kugou1002：新安装不会继承旧版的设置、收藏与登录，请先用设置里的备份导出再恢复。"
+            ],
+            features: [
+                "歌词与音频地址并行预取，打开即有歌词",
+                "酷狗 KRC 逐字高亮（主歌词、黑胶歌词、Folia 舞台）",
+                "歌词版本不对时自动重取更匹配的版本（LRCLIB / 酷狗重搜）",
+                "本首歌单独歌词偏移（±0.1s 微调）",
+                "歌词滚动跟随更快（0.15s），跳行或 seek 后直接定位",
+                "全新暖橙色图标，应用改名 Sherry"
+            ],
+            fixes: [
+                "修复 1.7.0 缺少全部 Co 定制的问题（捐赠入口、酷狗专版逻辑等）"
+            ]
+        ),
+        VersionLog(
             id: "1.8.1",
             version: "1.8.1",
             title: "动态壁纸与听歌统计优化",

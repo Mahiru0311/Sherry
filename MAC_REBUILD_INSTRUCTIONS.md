@@ -107,13 +107,13 @@ IPA 未加密，但主程序实现符号大多被剥离，无 DWARF。资料包�
 3. 先做一次基线编译保存日志，再分块修改和编译。可用基本命令：
 
    xcodegen generate
-   xcodebuild -list -project Beans.xcodeproj
-   xcodebuild -project Beans.xcodeproj -scheme Beans -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+   xcodebuild -list -project Sherry.xcodeproj
+   xcodebuild -project Sherry.xcodeproj -scheme Sherry -configuration Release -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
 
    按实际 SDK 选择运行目标。流水线脚本仅供本地参考，不调用 GitHub Actions。
 4. 运行 scripts/check-bilibili-protocol.swift 对应的本地协议检查、现有 Beans/CiliCili 测试以及相关 UI 测试。当前 CiliCiliPortUITests 的首页测试要求旧的五个根标签，产品调整后应更新为新的分区、搜索、我的入口验收，不要保留过时断言或删除有效覆盖。
 5. 为来源队列、分页过期结果、播放交接和备份合并提供实质测试；在模拟器验证布局，真机验证音频/锁屏/直播与网络行为。验证详情/评论反复切换滚动不丢失、无重复 sheet，点赞/头像子按钮不被整行回复手势吞掉。
-6. 完成实际成功的 Release 构建后，把 build/Build/Products/Release-iphoneos 下真实 Beans.app 及已嵌入 framework/extension 打成 Payload ZIP，命名清楚并说明未签名。确认 IPA 内有正确版本、framework 和 extension；不能改文件扩展名就声称构建成功。
+6. 完成实际成功的 Release 构建后，把 build/Build/Products/Release-iphoneos 下真实 Sherry.app 及已嵌入 framework/extension 打成 Payload ZIP，命名清楚并说明未签名。确认 IPA 内有正确版本、framework 和 extension；不能改文件扩展名就声称构建成功。
 7. 将完整修改源码、未签名 IPA、修改清单、本地构建日志和验收结果放到 Mac 桌面。源码包含 project.yml、Beans、Modules、资源/许可证、测试和必要脚本；排除 backend、密钥备份、build、DerivedData 和临时分析工具。不要把反编译 .c 纳入应用 target。
 8. 标明确实完成、仅凭证据重建以及仍需真机核验的内容。最后给出桌面源码和 IPA 的准确路径、Xcode/SDK 与构建结果、体积对比和剩余限制。先完成所有可独立执行的工作，不要停在“可以继续”或要求我反复回复继续。
 

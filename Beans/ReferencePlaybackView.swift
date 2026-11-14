@@ -1609,7 +1609,7 @@ struct CoSoftwareVolumeSheet: View {
                             .foregroundStyle(Color.coComment)
                     }
 
-                    Text("只调整 Co 的播放音量，不改变系统音量。适合和其他音频同时播放时降低背景音。")
+                    Text("只调整 Sherry 的播放音量，不改变系统音量。适合和其他音频同时播放时降低背景音。")
                         .font(CoFont.appFont(13))
                         .foregroundStyle(Color.coComment)
                         .fixedSize(horizontal: false, vertical: true)

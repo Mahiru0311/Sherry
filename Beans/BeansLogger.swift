@@ -43,7 +43,7 @@ final class CoLogger: ObservableObject {
     }()
 
     private init() {
-        log("Co 启动（版本 \(Self.appVersion)）", level: .info)
+        log("Sherry 启动（版本 \(Self.appVersion)）", level: .info)
     }
 
     static var appVersion: String {
