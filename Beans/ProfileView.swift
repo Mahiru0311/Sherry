@@ -4298,12 +4298,45 @@ struct BackupDocumentPicker: UIViewControllerRepresentable {
 /// 歌词偏移编辑页：全局生效（全部歌曲），提前为正、延迟为负，范围 ±5 秒、步进 0.1 秒。
 struct CoLyricOffsetSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var player: PlayerManager
     @AppStorage(LyricTiming.userOffsetKey) private var offset = 0.0
+    /// 本首歌单独的歌词偏移（nil = 跟随全局）；打开设置页 / 切歌时同步
+    @State private var perSongOffset: Double? = nil
 
     static func text(for offset: Double) -> String {
         if offset > 0.001 { return String(format: "提前 %.1f 秒", offset) }
         if offset < -0.001 { return String(format: "延迟 %.1f 秒", -offset) }
         return "不偏移"
+    }
+
+    private var perSongOffsetText: String {
+        if let offset = perSongOffset {
+            if offset == 0 { return "同步" }
+            return offset > 0
+                ? "提前 " + String(format: "%.1f", offset) + " 秒"
+                : "延后 " + String(format: "%.1f", -offset) + " 秒"
+        }
+        return "跟随全局"
+    }
+
+    private func syncPerSongOffset() {
+        perSongOffset = player.currentSong.map { LyricTiming.perSongOffset(for: $0.identityKey) } ?? nil
+    }
+
+    /// 本首歌偏移 ±0.1s 微调（首次调整从当前全局偏移起步）
+    private func adjustPerSongOffset(by delta: Double) {
+        guard let song = player.currentSong else { return }
+        let current = perSongOffset ?? offset
+        let next = ((current + delta) * 10).rounded() / 10
+        let clamped = min(max(next, -10), 10)
+        LyricTiming.setPerSongOffset(clamped, for: song.identityKey)
+        perSongOffset = clamped
+    }
+
+    private func clearPerSongOffset() {
+        guard let song = player.currentSong else { return }
+        LyricTiming.setPerSongOffset(nil, for: song.identityKey)
+        perSongOffset = nil
     }
 
     var body: some View {
@@ -4343,6 +4376,50 @@ struct CoLyricOffsetSheet: View {
                         .font(CoFont.appFont(12))
                         .foregroundStyle(Color.coComment)
                 }
+                Divider().overlay(Color.coComment.opacity(0.15))
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("本首歌")
+                            .font(CoFont.appFont(13))
+                            .foregroundStyle(Color.coComment)
+                        Spacer()
+                        Text(player.currentSong?.name ?? "未在播放")
+                            .font(CoFont.appFont(13, .medium))
+                            .foregroundStyle(Color.coLabel)
+                            .lineLimit(1)
+                    }
+                    HStack(spacing: 12) {
+                        Button { adjustPerSongOffset(by: -0.1) } label: {
+                            Image(systemName: "minus")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(width: 36, height: 36)
+                        }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.circle)
+                        .disabled(player.currentSong == nil)
+                        Button { adjustPerSongOffset(by: 0.1) } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(width: 36, height: 36)
+                        }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.circle)
+                        .disabled(player.currentSong == nil)
+                        Spacer()
+                        Text(perSongOffsetText)
+                            .font(CoFont.appFont(15, .medium))
+                            .foregroundStyle(Color.coAmber)
+                        if perSongOffset != nil {
+                            Button("跟随全局") { clearPerSongOffset() }
+                                .font(CoFont.appFont(12, .semibold))
+                                .foregroundStyle(Color.coAmber)
+                                .buttonStyle(.plain)
+                        }
+                    }
+                    Text("只对当前歌曲生效（±0.1s 微调）；未设置时跟随上方全局偏移")
+                        .font(CoFont.appFont(11))
+                        .foregroundStyle(Color.coComment)
+                }
             }
             .padding()
             .navigationTitle("歌词偏移")
@@ -4359,5 +4436,7 @@ struct CoLyricOffsetSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .onAppear { syncPerSongOffset() }
+        .onChange(of: player.currentSong?.identityKey) { _ in syncPerSongOffset() }
     }
 }
