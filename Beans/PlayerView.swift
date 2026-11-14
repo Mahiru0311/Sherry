@@ -1940,14 +1940,16 @@ struct PlayerView: View {
     }
 
     /// 黑胶歌词行文本：播放行有逐字时间时逐词高亮（已唱实色、未唱淡色），否则整行单色
-    private func vinylLyricLineText(_ line: LyricLine, isActive: Bool, visualFocus: Bool) -> Text {
+    @ViewBuilder
+    private func vinylLyricLineText(_ line: LyricLine, isActive: Bool, visualFocus: Bool) -> some View {
         if isActive, line.hasWordTimings {
             let progress = LyricTiming.effectiveProgress(clock.progress, userOffset: effectiveLyricOffset)
-            return line.wordHighlightedText(progress: progress, active: albumTitleForeground, inactive: albumTitleForeground.opacity(0.36))
+            line.wordHighlightedText(progress: progress, active: albumTitleColor, inactive: albumTitleColor.opacity(0.36))
+        } else {
+            Text(line.text.isEmpty ? " " : line.text)
+                .foregroundStyle(albumTitleForeground)
+                .opacity(visualFocus ? 1 : 0.36)
         }
-        return Text(line.text.isEmpty ? " " : line.text)
-            .foregroundStyle(albumTitleForeground)
-            .opacity(visualFocus ? 1 : 0.36)
     }
 
     private func scheduleVinylLyricSelection(_ index: Int) {
