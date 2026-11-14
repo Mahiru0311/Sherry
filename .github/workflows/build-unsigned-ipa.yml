@@ -58,8 +58,8 @@ jobs:
           echo "VERSION_LABEL=$VER" >> "$GITHUB_ENV"
           echo "VERSION_TAG=v$VER" >> "$GITHUB_ENV"
           xcodebuild \
-            -project Beans.xcodeproj \
-            -scheme Beans \
+            -project Sherry.xcodeproj \
+            -scheme Sherry \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
@@ -75,19 +75,19 @@ jobs:
           echo "== project.yml =="
           grep -E "MARKETING_VERSION|CURRENT_PROJECT_VERSION" project.yml
           echo "== built Info.plist =="
-          plutil -p build/Build/Products/Release-iphoneos/Beans.app/Info.plist | grep -E "CFBundleShortVersionString|CFBundleVersion"
+          plutil -p build/Build/Products/Release-iphoneos/Sherry.app/Info.plist | grep -E "CFBundleShortVersionString|CFBundleVersion"
 
       - name: Package IPA
         run: |
           mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/Beans.app Payload/
-          ditto -c -k --sequesterRsrc --keepParent Payload Beans-unsigned.ipa
+          cp -R build/Build/Products/Release-iphoneos/Sherry.app Payload/
+          ditto -c -k --sequesterRsrc --keepParent Payload Sherry-unsigned.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Beans-unsigned-ipa
-          path: Beans-unsigned.ipa
+          name: Sherry-unsigned-ipa
+          path: Sherry-unsigned.ipa
 
       - name: Build release notes from CHANGELOG
         run: |
@@ -97,7 +97,7 @@ jobs:
           content = open('CHANGELOG.md', encoding='utf-8').read()
           m = re.search(r'^##\s+' + re.escape(ver) + r'\s*$([\s\S]*?)(?=^##\s|\Z)', content, re.M)
           body = m.group(1).strip() if m else ('版本 ' + ver + ' 的更新内容。')
-          body = '# Beans Music ' + ver + '\n\n' + body + '\n'
+          body = '# Sherry ' + ver + '\n\n' + body + '\n'
           with open('release_body.md', 'w', encoding='utf-8') as f:
               f.write(body)
           print(body)
@@ -110,9 +110,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ env.VERSION_TAG }}
-          name: Beans Music ${{ env.VERSION_LABEL }}
+          name: Sherry ${{ env.VERSION_LABEL }}
           body_path: release_body.md
-          files: Beans-unsigned.ipa
+          files: Sherry-unsigned.ipa
           update_release_body: true
           update_release_name: true
           update_release_assets: true

@@ -30,6 +30,9 @@ enum PlayMode: String, CaseIterable, Identifiable {
 final class PlaybackClock: ObservableObject {
     @Published private(set) var progress: Double = 0
     @Published private(set) var duration: Double = 0
+    /// 歌词专用高频进度：不受 0.18s 节流限制，随 0.05s 观察器更新（仅歌词高亮/定位使用；
+    /// 进度条等 UI 仍用 progress，保持原有行为）
+    @Published private(set) var lyricProgress: Double = 0
 
     func update(progress: Double? = nil, duration: Double? = nil) {
         let apply = {
@@ -38,6 +41,21 @@ final class PlaybackClock: ObservableObject {
             }
             if let duration, abs(duration - self.duration) > 0.01 {
                 self.duration = duration
+            }
+        }
+        if Thread.isMainThread {
+            apply()
+        } else {
+            DispatchQueue.main.async(execute: apply)
+        }
+    }
+
+    /// 歌词进度更新：只做 5ms 去抖，避免同一时间点重复发布
+    func updateLyricProgress(_ value: Double) {
+        guard value.isFinite else { return }
+        let apply = {
+            if abs(value - self.lyricProgress) > 0.005 {
+                self.lyricProgress = value
             }
         }
         if Thread.isMainThread {
@@ -74,6 +92,10 @@ final class PlayerManager: NSObject, ObservableObject {
     @Published var sleepTimerRemaining: Int = 0
     @Published var history: [Song] = []
     @Published var playCounts: [String: Int] = [:]
+    /// seek 代次：歌词滚动用它识别“刚 seek 过”，跳行时不做动画
+    @Published private(set) var seekRevision = 0
+    /// 歌词修订代次：预取完成或版本校验换掉歌词后 +1，PlayerView 据此刷新
+    @Published private(set) var lyricRevision = 0
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -96,6 +118,14 @@ final class PlayerManager: NSObject, ObservableObject {
     private var wasPlayingBeforeInterruption = false
     private var lastPublishedProgress: Double = -1
     private var lastPersistedProgress: Double = -1
+    /// 歌词内存缓存：identityKey -> 已解析歌词行（预取 + 播放器复用，避免重复请求）
+    private var lyricCache: [String: [LyricLine]] = [:]
+    private var lyricCacheOrder: [String] = []
+    private static let lyricCacheLimit = 20
+    /// 歌词版本校验已检查过的签名：identityKey -> "音频时长(取整秒)-是否第三方"
+    private var lyricVersionCheckSignatures: [String: String] = [:]
+    /// 当前歌曲音频是否来自第三方音源（版本校验用）
+    private var lyricAudioWasThirdParty: [String: Bool] = [:]
     private var lastNowPlayingArtworkKey: String?
     /// 酷狗高音质地址在部分账号/系统上会返回但无法由 AVPlayer 打开；每首歌只自动降级一次。
     private var kugouStandardFallbackSongKey: String?
@@ -277,6 +307,9 @@ final class PlayerManager: NSObject, ObservableObject {
     func seek(to seconds: Double) {
         let clamped = max(0, min(seconds, max(duration, 0)))
         progress = clamped
+        // 歌词立即跟跳，并标记一次 seek（歌词滚动据此跳过动画）
+        seekRevision += 1
+        clock.updateLyricProgress(clamped)
         // 用 seek 完成回调同步真实进度：避免暂停状态下拖动进度后，歌词定位与实际播放位置不一致
         player?.seek(
             to: CMTime(seconds: clamped, preferredTimescale: 600),
@@ -290,6 +323,7 @@ final class PlayerManager: NSObject, ObservableObject {
                 if abs(actual - self.progress) > 0.25 {
                     self.progress = actual
                 }
+                self.clock.updateLyricProgress(actual)
             }
         }
         updateNowPlaying()
@@ -489,6 +523,10 @@ final class PlayerManager: NSObject, ObservableObject {
         pushHistory(song)
         savePersistedPlaybackState()
         Task {
+            // 歌词与音频地址并行解析；歌词失败静默（PlayerView 仍会按原逻辑再取一次）
+            Task { [weak self] in
+                await self?.prefetchLyrics(for: song, generation: generation)
+            }
             var urlString: String?
             var resolvedThirdParty: UnblockService.Resolved?
             var qqOfficialBR: String?
@@ -577,6 +615,170 @@ final class PlayerManager: NSObject, ObservableObject {
                     attemptedQQOfficialBRs: attemptedQQOfficialBRs
                 )
             }
+        }
+    }
+
+    // MARK: - 歌词：预取 / 缓存 / 版本校验
+
+    /// PlayerView 读取预取歌词（命中则不再发请求）
+    func cachedLyrics(for identityKey: String) -> [LyricLine]? {
+        lyricCache[identityKey]
+    }
+
+    private func storeLyrics(_ lines: [LyricLine], for identityKey: String) {
+        if lyricCache[identityKey] == nil {
+            lyricCacheOrder.append(identityKey)
+            if lyricCacheOrder.count > Self.lyricCacheLimit, let oldest = lyricCacheOrder.first {
+                lyricCacheOrder.removeFirst()
+                lyricCache.removeValue(forKey: oldest)
+            }
+        }
+        lyricCache[identityKey] = lines
+    }
+
+    /// 与音频地址解析并行预取歌词；切歌后旧任务的结果会被代次丢弃
+    private func prefetchLyrics(for song: Song, generation: Int) async {
+        guard lyricCache[song.identityKey] == nil else { return }
+        let lines = await Self.fetchLyricsForSong(song)
+        await MainActor.run {
+            guard generation == self.loadGeneration else { return }
+            self.storeLyrics(lines, for: song.identityKey)
+            self.lyricRevision += 1
+            self.maybeCheckLyricVersion()
+        }
+    }
+
+    /// 播放器内统一的歌词抓取（平台分发 + 逐字歌词合并），供预取与 PlayerView 共用
+    func fetchLyrics(for song: Song) async -> [LyricLine] {
+        if let cached = lyricCache[song.identityKey], !cached.isEmpty { return cached }
+        let lines = await Self.fetchLyricsForSong(song)
+        await MainActor.run {
+            self.storeLyrics(lines, for: song.identityKey)
+            self.lyricRevision += 1
+        }
+        return lines
+    }
+
+    private static func fetchLyricsForSong(_ song: Song) async -> [LyricLine] {
+        switch song.source {
+        case .kugou:
+            guard let hash = song.kugouHash else { return [] }
+            let base = LyricParser.parse(await KugouMusicAPI.shared.lyric(hash: hash, duration: song.duration))
+            // 逐字歌词（KRC）：解不开或无词级时间时静默回落行级
+            if let krcText = await KugouMusicAPI.shared.lyricKRCText(hash: hash, duration: song.duration) {
+                let wordLines = LyricParser.parseKRC(krcText)
+                if !wordLines.isEmpty {
+                    return base.isEmpty ? wordLines : LyricParser.mergingWords(wordLines, into: base)
+                }
+            }
+            return base
+        case .qq:
+            guard let mid = song.qqMid,
+                  let raw = try? await QQMusicAPI.shared.lyric(songmid: mid) else { return [] }
+            return LyricParser.parse(raw)
+        case .netease:
+            guard let (lrc, tlyric, yrc) = try? await NetEaseAPI.shared.lyricWithTranslation(id: song.id) else { return [] }
+            let base = LyricParser.parse(lrc ?? "", translationRaw: tlyric)
+            if let yrc, !yrc.isEmpty {
+                let wordLines = LyricParser.parseYRC(yrc)
+                if !wordLines.isEmpty {
+                    return base.isEmpty ? wordLines : LyricParser.mergingWords(wordLines, into: base)
+                }
+            }
+            return base
+        }
+    }
+
+    /// 歌词版本校验：歌词末行与音频实际时长差 > 5s，或音频来自第三方时，
+    /// 按 歌名+歌手+时长重取一次歌词（LRCLIB 优先，其次换平台），命中更匹配的版本才替换。
+    /// 同一首歌同一（时长，第三方）组合只校验一次；预取完成、播放器建立、
+    /// 音频实际时长到达时各触发一次（签名去重）。
+    private func maybeCheckLyricVersion() {
+        guard let song = currentSong,
+              let cached = lyricCache[song.identityKey],
+              !cached.isEmpty else { return }
+        let audioDuration = duration
+        guard audioDuration > 0 else { return }
+        let thirdParty = lyricAudioWasThirdParty[song.identityKey] == true
+        let signature = "\(Int(audioDuration))-\(thirdParty)"
+        guard lyricVersionCheckSignatures[song.identityKey] != signature else { return }
+        lyricVersionCheckSignatures[song.identityKey] = signature
+        let lastLyricTime = cached.last?.time ?? 0
+        let mismatch = abs(lastLyricTime - audioDuration) > 5
+        guard mismatch || thirdParty else { return }
+        BeansLogger.shared.log("歌词版本校验：\(song.name) - \(song.artists)｜歌词末行=\(String(format: "%.1f", lastLyricTime))s 音频时长=\(String(format: "%.1f", audioDuration))s 第三方=\(thirdParty ? "是" : "否") 触发重取", level: .info)
+        Task { [weak self] in
+            guard let self else { return }
+            guard let better = await Self.refetchLyricsForVersionCheck(song: song, audioDuration: audioDuration) else { return }
+            await MainActor.run {
+                guard self.currentSong?.identityKey == song.identityKey else { return }
+                self.storeLyrics(better, for: song.identityKey)
+                self.lyricRevision += 1
+                BeansLogger.shared.log("歌词版本校验：已替换为更匹配的版本：\(song.name)", level: .info)
+            }
+        }
+    }
+
+    private static func refetchLyricsForVersionCheck(song: Song, audioDuration: Double) async -> [LyricLine]? {
+        // 1) LRCLIB：按歌名 + 歌手 + 时长精确匹配
+        if let lines = await fetchLyricsFromLRCLIB(song: song, audioDuration: audioDuration) {
+            return lines
+        }
+        // 2) 换平台歌词接口兜底
+        return await fetchLyricsFromOtherPlatform(song: song, audioDuration: audioDuration)
+    }
+
+    private static func fetchLyricsFromLRCLIB(song: Song, audioDuration: Double) async -> [LyricLine]? {
+        var components = URLComponents(string: "https://lrclib.net/api/get")!
+        var items = [
+            URLQueryItem(name: "artist_name", value: song.artists),
+            URLQueryItem(name: "track_name", value: song.name),
+            URLQueryItem(name: "duration", value: String(Int(audioDuration.rounded()))),
+        ]
+        if !song.album.isEmpty {
+            items.append(URLQueryItem(name: "album_name", value: song.album))
+        }
+        components.queryItems = items
+        guard let url = components.url else { return nil }
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let synced = json["syncedLyrics"] as? String, !synced.isEmpty else {
+                BeansLogger.shared.log("歌词版本校验：LRCLIB 无匹配：\(song.name)", level: .debug)
+                return nil
+            }
+            let lines = LyricParser.parse(synced)
+            guard let last = lines.last?.time, abs(last - audioDuration) <= 5 else {
+                BeansLogger.shared.log("歌词版本校验：LRCLIB 候选仍不匹配（末行 \(String(format: "%.1f", lines.last?.time ?? 0))s），放弃", level: .debug)
+                return nil
+            }
+            return lines
+        } catch {
+            BeansLogger.shared.log("歌词版本校验：LRCLIB 请求失败：\(error.localizedDescription)", level: .debug)
+            return nil
+        }
+    }
+
+    /// 换平台兜底：网易云 -> QQ 歌词；QQ / 酷狗 -> 网易云歌词，均要求时长接近（< 5s）
+    private static func fetchLyricsFromOtherPlatform(song: Song, audioDuration: Double) async -> [LyricLine]? {
+        let keyword = ([song.name, song.artists].filter { !$0.isEmpty }).joined(separator: " ")
+        guard !keyword.isEmpty else { return nil }
+        if song.source == .netease {
+            guard let results = try? await QQMusicAPI.shared.searchSongs(keyword: keyword, limit: 5),
+                  let hit = results.first(where: { abs($0.duration - audioDuration) < 5 }),
+                  let mid = hit.qqMid,
+                  let raw = try? await QQMusicAPI.shared.lyric(songmid: mid) else { return nil }
+            let lines = LyricParser.parse(raw)
+            guard let last = lines.last?.time, abs(last - audioDuration) <= 5 else { return nil }
+            return lines
+        } else {
+            guard let results = try? await NetEaseAPI.shared.search(keyword: keyword, limit: 5),
+                  let hit = results.first(where: { abs($0.duration - audioDuration) < 5 }),
+                  let (lrc, tlyric, _) = try? await NetEaseAPI.shared.lyricWithTranslation(id: hit.id) else { return nil }
+            let lines = LyricParser.parse(lrc ?? "", translationRaw: tlyric)
+            guard let last = lines.last?.time, abs(last - audioDuration) <= 5 else { return nil }
+            return lines
         }
     }
 
@@ -947,6 +1149,8 @@ final class PlayerManager: NSObject, ObservableObject {
         attemptedQQOfficialBRs: [String] = []
     ) {
         guard ensurePlaybackAllowed(), let loadedSong = currentSong else { return }
+        // 记录本首歌音频是否来自第三方（歌词版本校验用）
+        lyricAudioWasThirdParty[loadedSong.identityKey] = isThirdParty
         if isThirdParty {
             let quality = thirdPartyQuality ?? ThirdPartyAudioQuality.current
             activeThirdPartyQuality = quality
@@ -1107,9 +1311,12 @@ final class PlayerManager: NSObject, ObservableObject {
             bumpPlayCount(song)
             lastCountedSongID = song.identityKey
         }
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main) { [weak self] time in
+        // 歌词高频时钟：0.05s 观察间隔；progress 仍按 0.18s 节流发布（UI 进度条行为不变），
+        // 2s 持久化节流保持不变；歌词走独立的 lyricProgress 通道，不经过 0.18s 节流。
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.05, preferredTimescale: 600), queue: .main) { [weak self] time in
             guard let self, let player = self.player else { return }
             if time.seconds.isFinite {
+                self.clock.updateLyricProgress(time.seconds)
                 if abs(time.seconds - self.lastPublishedProgress) >= 0.18 {
                     self.lastPublishedProgress = time.seconds
                     self.progress = time.seconds
@@ -1123,6 +1330,8 @@ final class PlayerManager: NSObject, ObservableObject {
                 let seconds = itemDuration.seconds
                 if seconds.isFinite, abs(seconds - self.duration) > 0.25 {
                     self.duration = seconds
+                    // 音频实际时长已知后，校验歌词版本是否与该音频匹配
+                    self.maybeCheckLyricVersion()
                 }
             }
             let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
@@ -1156,6 +1365,8 @@ final class PlayerManager: NSObject, ObservableObject {
             if self.retryKugouAtStandardIfNeeded(error: item.error) { return }
             self.finishUnrecoverablePlaybackFailure(song: loadedSong, reason: "播放中断失败")
         }
+        // 播放器已建立：用当前已知时长（元数据或实际时长）做一次歌词版本校验
+        maybeCheckLyricVersion()
         updateNowPlaying()
     }
 

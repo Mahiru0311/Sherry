@@ -1,3 +1,4 @@
+import Compression
 import Foundation
 import Security
 import UIKit
@@ -1335,7 +1336,56 @@ final class KugouMusicAPI {
     }
 
     func lyric(hash: String, duration: TimeInterval) async -> String {
-        guard !hash.isEmpty else { return "" }
+        guard let (id, accessKey) = await lyricCandidate(hash: hash, duration: duration),
+              let data = await lyricDownloadData(id: id, accessKey: accessKey, fmt: "lrc") else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    /// 酷狗逐字歌词原文（KRC 解码后）：fmt=krc 返回 base64 编码的 krc1 文件，
+    /// 结构为 "krc1" 魔数 + XOR 加密 + zlib 压缩。
+    /// 2026-11-15 实测：经典 XOR key（@Gaw^2t ^^ab__）已解不开当前接口返回的数据
+    /// （对 晴天 实测：仅 zlib 头两字节吻合，第 9 字节起即失效；短 key/派生 key 均失败），
+    /// 疑似酷狗已更换加密方案。解码失败返回 nil，调用方静默回落 LRC 行级歌词。
+    func lyricKRCText(hash: String, duration: TimeInterval) async -> String? {
+        guard let (id, accessKey) = await lyricCandidate(hash: hash, duration: duration),
+              let data = await lyricDownloadData(id: id, accessKey: accessKey, fmt: "krc"),
+              data.count > 4,
+              data.prefix(4) == Data("krc1".utf8) else { return nil }
+        let encrypted = [UInt8](data.dropFirst(4))
+        let xored = encrypted.enumerated().map { $0.element ^ Self.krcXORKey[$0.offset % Self.krcXORKey.count] }
+        guard let inflated = Self.zlibDecompress(Data(xored)),
+              let text = String(data: inflated, encoding: .utf8),
+              !text.isEmpty else { return nil }
+        return text
+    }
+
+    /// KRC 经典 XOR key（见 lyricKRCText 注释：当前接口疑似已更换方案）
+    private static let krcXORKey: [UInt8] = [0x40, 0x47, 0x61, 0x77, 0x5e, 0x32, 0x74, 0x20, 0x5e, 0x5e, 0x61, 0x62, 0x5f, 0x5f]
+
+    private static func zlibDecompress(_ data: Data) -> Data? {
+        guard !data.isEmpty else { return nil }
+        // 歌词文件很小；1MB 输出缓冲绰绰有余
+        let capacity = 1 << 20
+        var output = [UInt8](repeating: 0, count: capacity)
+        let decodedSize = data.withUnsafeBytes { input in
+            output.withUnsafeMutableBytes { out in
+                compression_decode_buffer(
+                    out.baseAddress!.assumingMemoryBound(to: UInt8.self),
+                    capacity,
+                    input.baseAddress!.assumingMemoryBound(to: UInt8.self),
+                    data.count,
+                    nil,
+                    COMPRESSION_ZLIB
+                )
+            }
+        }
+        guard decodedSize > 0 else { return nil }
+        return Data(output.prefix(decodedSize))
+    }
+
+    /// 酷狗歌词候选：按 hash + 时长搜索，返回下载所需的 id / accesskey
+    private func lyricCandidate(hash: String, duration: TimeInterval) async -> (id: Any, accessKey: Any)? {
+        guard !hash.isEmpty else { return nil }
         var search = URLComponents(string: "http://lyrics.kugou.com/search")!
         search.queryItems = [
             URLQueryItem(name: "ver", value: "1"),
@@ -1346,20 +1396,25 @@ final class KugouMusicAPI {
         ]
         guard let sjson = try? await getJSON(search.url!, ua: Self.browserUA),
               let first = (sjson["candidates"] as? [[String: Any]])?.first,
-              let id = first["id"], let accessKey = first["accesskey"] else { return "" }
+              let id = first["id"], let accessKey = first["accesskey"] else { return nil }
+        return (id, accessKey)
+    }
+
+    /// 酷狗歌词下载：返回 base64 解码后的原始字节（lrc 为 UTF-8 文本，krc 为 krc1 文件）
+    private func lyricDownloadData(id: Any, accessKey: Any, fmt: String) async -> Data? {
         var download = URLComponents(string: "http://lyrics.kugou.com/download")!
         download.queryItems = [
             URLQueryItem(name: "ver", value: "1"),
             URLQueryItem(name: "client", value: "pc"),
             URLQueryItem(name: "id", value: "\(id)"),
             URLQueryItem(name: "accesskey", value: "\(accessKey)"),
-            URLQueryItem(name: "fmt", value: "lrc"),
+            URLQueryItem(name: "fmt", value: fmt),
             URLQueryItem(name: "charset", value: "utf8"),
         ]
         guard let djson = try? await getJSON(download.url!, ua: Self.browserUA),
               let content = djson["content"] as? String,
-              let data = Data(base64Encoded: content.replacingOccurrences(of: "\n", with: "")) else { return "" }
-        return String(data: data, encoding: .utf8) ?? ""
+              let data = Data(base64Encoded: content.replacingOccurrences(of: "\n", with: "")) else { return nil }
+        return data
     }
 
     // MARK: - 酷狗评论

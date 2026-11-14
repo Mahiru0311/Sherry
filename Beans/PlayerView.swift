@@ -34,6 +34,10 @@ struct PlayerView: View {
     @State private var pickedArtistName = ""
     @State private var showArtistPicker = false
     @State private var vinylFocusedLyricIndex: Int?
+    /// 黑胶歌词上一行索引（跳行 >1 行时不做动画，直接定位）
+    @State private var vinylLastLyricIndex: Int?
+    /// 刚 seek 过：下一次行变化直接定位，不做动画
+    @State private var vinylPendingSeekJump = false
     @State private var vinylLyricsViewportHeight: CGFloat = 0
     @State private var vinylIsDraggingLyrics = false
     @State private var vinylLyricsResumeTask: Task<Void, Never>?
@@ -100,6 +104,11 @@ struct PlayerView: View {
     @AppStorage("beans.lyricTiltY") private var lyricTiltY = 0
     /// 歌词进度偏移（秒）：歌词与音频不同步时手动校正，正数提前、负数延后
     @AppStorage("beans.lyricOffset") private var lyricOffset = 0.0
+
+    /// 生效的歌词偏移：本首歌单独设置过就用本首歌的，否则跟随全局
+    private var effectiveLyricOffset: Double {
+        LyricTiming.effectiveOffset(for: song?.identityKey, globalOffset: lyricOffset)
+    }
     /// 歌词界面自定义背景
     @AppStorage("beans.lyricBackground.image") private var lyricBackgroundImagePath = ""
     @AppStorage("beans.lyricBackground.blur") private var lyricBackgroundBlur = 12.0
@@ -560,6 +569,12 @@ struct PlayerView: View {
             await loadLyrics()
             await extractCoverPalette()
         }
+        .onChange(of: player.lyricRevision) { _ in
+            // 预取完成或版本校验换掉歌词后，刷新当前歌词
+            if let song, let cached = player.cachedLyrics(for: song.identityKey), !cached.isEmpty {
+                lyrics = cached
+            }
+        }
         .onChange(of: layoutData) { newValue in
             PlayerLayoutStore.save(newValue)
         }
@@ -781,7 +796,7 @@ struct PlayerView: View {
                         .font(BeansFont.appFont(12, .semibold))
                         .foregroundStyle(palette.secondary)
                         .lineLimit(1)
-                    Text(song?.album ?? "Beans Music")
+                    Text(song?.album ?? "Sherry")
                         .font(BeansFont.appFont(10))
                         .foregroundStyle(palette.secondary.opacity(0.85))
                         .lineLimit(1)
@@ -1105,11 +1120,14 @@ struct PlayerView: View {
                                     vinylLyricLine(lyrics[index], isFocused: vinylCurrentVisualIndex == index)
                                         .id(index)
                                         .background {
-                                            GeometryReader { rowGeometry in
-                                                Color.clear.preference(
-                                                    key: LyricCenterPreferenceKey.self,
-                                                    value: [index: rowGeometry.frame(in: .named("vinylLyricsViewport")).midY]
-                                                )
+                                            // 行中心只在拖动时测量，平时不跑每行 GeometryReader
+                                            if vinylIsDraggingLyrics {
+                                                GeometryReader { rowGeometry in
+                                                    Color.clear.preference(
+                                                        key: LyricCenterPreferenceKey.self,
+                                                        value: [index: rowGeometry.frame(in: .named("vinylLyricsViewport")).midY]
+                                                    )
+                                                }
                                             }
                                         }
                                 }
@@ -1155,9 +1173,16 @@ struct PlayerView: View {
                                 vinylScrollToCurrentLyric(proxy: proxy, animated: false)
                             }
                         }
-                        .onChange(of: vinylCurrentLyricIndex) { _ in
-                            guard !vinylIsDraggingLyrics else { return }
-                            vinylScrollToCurrentLyric(proxy: proxy, animated: true)
+                        .onChange(of: vinylCurrentLyricIndex) { newIndex in
+                            let previous = vinylLastLyricIndex
+                            vinylLastLyricIndex = newIndex
+                            guard let newIndex, !vinylIsDraggingLyrics else { return }
+                            let jumped = previous.map { abs(newIndex - $0) > 1 } ?? true
+                            vinylScrollToCurrentLyric(proxy: proxy, animated: !(vinylPendingSeekJump || jumped))
+                            vinylPendingSeekJump = false
+                        }
+                        .onChange(of: player.seekRevision) { _ in
+                            vinylPendingSeekJump = true
                         }
                     }
                 }
@@ -1269,13 +1294,12 @@ struct PlayerView: View {
     private func vinylLyricLine(_ line: LyricLine, isFocused: Bool) -> some View {
         Button {
             BeansHaptics.tap()
-            player.seek(to: LyricTiming.seekTime(for: line, userOffset: lyricOffset))
+            player.seek(to: LyricTiming.seekTime(for: line, userOffset: effectiveLyricOffset))
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(line.text.isEmpty ? " " : line.text)
+                    vinylLyricLineText(line, isFocused: isFocused)
                         .font(BeansFont.appFont(isFocused ? 27 : 23, isFocused ? .bold : .semibold))
-                        .foregroundStyle(albumTitleForeground.opacity(isFocused ? 1 : 0.36))
                         .fixedSize(horizontal: false, vertical: true)
                     if isFocused, vinylIsDraggingLyrics {
                         Spacer(minLength: 8)
@@ -1301,9 +1325,24 @@ struct PlayerView: View {
         .animation(.spring(response: 0.28, dampingFraction: 0.88), value: isFocused)
     }
 
+    /// 黑胶歌词行文本：焦点行有逐字时间时逐词高亮（已唱实色、未唱淡色），否则整行单色。
+    /// 注意：返回 some View 且分支放在 Group 里——Text 若以显式 -> Text 返回，
+    /// 其上的 foregroundStyle 会解析到 iOS 17 才有的重载，在 iOS 15 部署目标下编不过。
+    private func vinylLyricLineText(_ line: LyricLine, isFocused: Bool) -> some View {
+        Group {
+            if isFocused, line.hasWordTimings {
+                let progress = LyricTiming.effectiveProgress(clock.lyricProgress, userOffset: effectiveLyricOffset)
+                line.wordHighlightedText(progress: progress, active: albumTitleColor, inactive: albumTitleColor.opacity(0.36))
+            } else {
+                Text(line.text.isEmpty ? " " : line.text)
+                    .foregroundStyle(albumTitleForeground.opacity(isFocused ? 1 : 0.36))
+            }
+        }
+    }
+
     private var vinylCurrentLyricIndex: Int? {
         guard !lyrics.isEmpty else { return nil }
-        let progress = LyricTiming.effectiveProgress(clock.progress, userOffset: lyricOffset)
+        let progress = LyricTiming.effectiveProgress(clock.lyricProgress, userOffset: effectiveLyricOffset)
         var low = 0
         var high = lyrics.count - 1
         var answer: Int?
@@ -1349,26 +1388,26 @@ struct PlayerView: View {
         guard let index = vinylCurrentLyricIndex else { return }
         let action = { proxy.scrollTo(index, anchor: vinylLyricsFocusAnchor) }
         if animated {
-            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.38)) { action() }
+            withAnimation(.easeInOut(duration: 0.15)) { action() }
         } else {
             action()
         }
     }
 
+    /// 手动滚动后保持 3s，之后回到当前播放行（不是停住的焦点行）
     private func vinylScheduleLyricsResume(proxy: ScrollViewProxy) {
         vinylLyricsResumeTask?.cancel()
-        let target = vinylFocusedLyricIndex ?? vinylCurrentLyricIndex
-        if let target {
-            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.34)) {
-                proxy.scrollTo(target, anchor: vinylLyricsFocusAnchor)
-            }
-        }
         vinylLyricsResumeTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard !Task.isCancelled else { return }
             vinylIsDraggingLyrics = false
             vinylFocusedLyricIndex = nil
             vinylLyricsResumeTask = nil
+            if let index = vinylCurrentLyricIndex {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    proxy.scrollTo(index, anchor: vinylLyricsFocusAnchor)
+                }
+            }
         }
     }
 
@@ -1819,7 +1858,7 @@ struct PlayerView: View {
         var answer: Int?
         while low <= high {
             let mid = (low + high) / 2
-            if lyrics[mid].time <= LyricTiming.effectiveProgress(clock.progress, userOffset: lyricOffset) {
+            if lyrics[mid].time <= LyricTiming.effectiveProgress(clock.lyricProgress, userOffset: effectiveLyricOffset) {
                 answer = mid
                 low = mid + 1
             } else {
@@ -1927,10 +1966,10 @@ struct PlayerView: View {
                         blurAmount: CGFloat(lyricBlurAmount),
                         tilt: CGFloat(lyricTilt),
                         tiltY: CGFloat(lyricTiltY),
-                        lyricOffset: CGFloat(lyricOffset)
+                        lyricOffset: CGFloat(effectiveLyricOffset)
                     ) { line in
                         BeansHaptics.tap()
-                        player.seek(to: LyricTiming.seekTime(for: line, userOffset: lyricOffset))
+                        player.seek(to: LyricTiming.seekTime(for: line, userOffset: effectiveLyricOffset))
                     }
                 }
             }
@@ -2917,22 +2956,14 @@ struct PlayerView: View {
         lyrics = []
         guard let song else { return }
         let identity = song.identityKey
-        func apply(_ parsed: [LyricLine]) {
-            guard self.song?.identityKey == identity else { return }
-            self.lyrics = parsed
+        // 优先用 PlayerManager 与音频并行预取的歌词，避免重复请求
+        if let cached = player.cachedLyrics(for: identity), !cached.isEmpty {
+            lyrics = cached
+            return
         }
-        if song.source == .kugou, let hash = song.kugouHash {
-            let raw = await KugouMusicAPI.shared.lyric(hash: hash, duration: song.duration)
-            apply(LyricParser.parse(raw))
-        } else if song.source == .qq, let mid = song.qqMid {
-            if let raw = try? await QQMusicAPI.shared.lyric(songmid: mid) {
-                apply(LyricParser.parse(raw))
-            }
-        } else {
-            if let (lrc, tlyric) = try? await NetEaseAPI.shared.lyricWithTranslation(id: song.id) {
-                apply(LyricParser.parse(lrc ?? "", translationRaw: tlyric))
-            }
-        }
+        let parsed = await player.fetchLyrics(for: song)
+        guard self.song?.identityKey == identity else { return }
+        self.lyrics = parsed
     }
 
     /// 一次性提取当前封面主色，带动整个播放器配色动态变化（失败时保持主题回退色，不影响任何功能）
@@ -3294,6 +3325,22 @@ private struct LyricCenterPreferenceKey: PreferenceKey {
 
 // MARK: - 歌词（居中显示 + 逐行高亮 + 自动滚动 + 点击跳转）
 
+extension LyricLine {
+    /// 逐字高亮文本：已唱的词用 active 色，未唱的用 inactive 色；无词级时间时返回整行文本。
+    /// 只渲染接口真实返回的词级时间，绝不合成。
+    func wordHighlightedText(progress: Double, active: Color, inactive: Color) -> Text {
+        guard hasWordTimings else {
+            return Text(text.isEmpty ? " " : text)
+        }
+        var result = Text("")
+        for word in words {
+            let color: Color = progress >= word.time ? active : inactive
+            result = result + Text(word.text).foregroundColor(color)
+        }
+        return result
+    }
+}
+
 struct LyricsSection: View {
     @EnvironmentObject private var player: PlayerManager
     @EnvironmentObject private var clock: PlaybackClock
@@ -3332,11 +3379,16 @@ struct LyricsSection: View {
     /// 用户手动滚动时暂停自动跟随，停手后延迟恢复。
     @State private var isUserScrolling = false
     @State private var resumeScrollTask: Task<Void, Never>?
+    /// 上一行索引（跳行 >1 行时不做动画，直接定位）
+    @State private var lastLyricIndex: Int?
+    /// 刚 seek 过：下一次行变化直接定位，不做动画
+    @State private var pendingSeekJump = false
     /// 歌词手动滚动时，以视口中心最近的一行作为视觉焦点。
     @State private var focusedIndex: Int?
     @State private var viewportHeight: CGFloat = 0
 
     /// 二分查找当前行（歌词按时间升序），避免逐行扫描降低 CPU
+    /// 用歌词高频进度（0.05s），逐字高亮才跟得上
     private var currentIndex: Int? {
         guard !lyrics.isEmpty else { return nil }
         var low = 0
@@ -3344,7 +3396,7 @@ struct LyricsSection: View {
         var answer: Int?
         while low <= high {
             let mid = (low + high) / 2
-            if lyrics[mid].time <= LyricTiming.effectiveProgress(clock.progress, userOffset: Double(lyricOffset)) {
+            if lyrics[mid].time <= LyricTiming.effectiveProgress(clock.lyricProgress, userOffset: Double(lyricOffset)) {
                 answer = mid
                 low = mid + 1
             } else {
@@ -3361,11 +3413,15 @@ struct LyricsSection: View {
                     ForEach(Array(lyrics.enumerated()), id: \.element.id) { index, line in
                         lyricRow(index: index, line: line)
                             .background {
-                                GeometryReader { rowGeometry in
-                                    Color.clear.preference(
-                                        key: LyricCenterPreferenceKey.self,
-                                        value: [index: rowGeometry.frame(in: .named("beansLyricsViewport")).midY]
-                                    )
+                                // 行中心只在用户拖动歌词时才测量：平时自动跟随
+                                // 只靠时间算出的 currentIndex，不需要每帧写 preference
+                                if isUserScrolling {
+                                    GeometryReader { rowGeometry in
+                                        Color.clear.preference(
+                                            key: LyricCenterPreferenceKey.self,
+                                            value: [index: rowGeometry.frame(in: .named("beansLyricsViewport")).midY]
+                                        )
+                                    }
                                 }
                             }
                             .contentShape(Rectangle())
@@ -3453,17 +3509,17 @@ struct LyricsSection: View {
                         resumeScrollTask?.cancel()
                     }
                     .onEnded { _ in
+                        // 停手后保持 3s（期间不自动跟随），之后回到当前播放行（不是停住的焦点行）
                         resumeScrollTask?.cancel()
-                        let selectedIndex = focusedIndex
-                        if let selectedIndex {
-                            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.38)) {
-                                proxy.scrollTo(selectedIndex, anchor: .center)
-                            }
-                        }
                         resumeScrollTask = Task { @MainActor in
                             try? await Task.sleep(nanoseconds: 3_000_000_000)
                             guard !Task.isCancelled else { return }
                             isUserScrolling = false
+                            if let current = currentIndex {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    proxy.scrollTo(current, anchor: anchor)
+                                }
+                            }
                         }
                     }
             )
@@ -3474,10 +3530,22 @@ struct LyricsSection: View {
                 }
             }
             .onChange(of: currentIndex) { newIndex in
+                let previous = lastLyricIndex
+                lastLyricIndex = newIndex
                 guard let newIndex, !isUserScrolling else { return }
-                withAnimation(.easeInOut(duration: 0.3)) {
+                // 跳行 >1 行或刚 seek 过：直接定位；否则 0.15s 跟随动画
+                let jumped = previous.map { abs(newIndex - $0) > 1 } ?? true
+                if pendingSeekJump || jumped {
+                    pendingSeekJump = false
                     proxy.scrollTo(newIndex, anchor: anchor)
+                } else {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        proxy.scrollTo(newIndex, anchor: anchor)
+                    }
                 }
+            }
+            .onChange(of: player.seekRevision) { _ in
+                pendingSeekJump = true
             }
         }
     }
@@ -3512,11 +3580,23 @@ struct LyricsSection: View {
         let lineFont: Font = BeansFont.appFont(size)
         // 翻译行只展示在当前视觉焦点行下方。
         let translationText = (isCurrent && showTranslation) ? line.translation : nil
+        // 当前行有逐字时间时逐词高亮（已唱行渐变色、未唱暗色），否则整行单色；
+        // 逐词高亮时不套外层 foregroundStyle，避免覆盖词级颜色。
+        // 注意：分支必须留在 ViewBuilder 里——Text 若以显式类型提出去，
+        // 其上的 foregroundStyle 会解析到 iOS 17 才有的重载，在 iOS 15 部署目标下编不过。
+        let hasWordHighlight = isCurrent && line.hasWordTimings
+        let wordProgress = LyricTiming.effectiveProgress(clock.lyricProgress, userOffset: Double(lyricOffset))
 
         return VStack(alignment: alignment == .leading ? .leading : .center, spacing: 3) {
-            Text(line.text.isEmpty ? " " : line.text)
+            Group {
+                if hasWordHighlight {
+                    line.wordHighlightedText(progress: wordProgress, active: gradientStart ?? accent, inactive: secondary)
+                } else {
+                    Text(line.text.isEmpty ? " " : line.text)
+                        .foregroundStyle(lineStyle)
+                }
+            }
                 .font(lineFont)
-                .foregroundStyle(lineStyle)
                 // 双层光晕：内层亮、外层宽，发光更明显
                 .shadow(
                     color: isCurrent ? glowColor.opacity(glowRadius > 0 ? 0.9 : 0) : .clear,
@@ -3652,6 +3732,7 @@ struct LyricPreset {
 
 struct PlayerSettingsSheet: View {
     @EnvironmentObject private var theme: ThemeStore
+    @EnvironmentObject private var player: PlayerManager
     private let onDismiss: (() -> Void)?
     @AppStorage("beans.playerBreath") private var breath = 0.6
     @AppStorage("beans.playerDustMode") private var playerDustModeRaw = BeansPlayerDustMode.off.rawValue
@@ -4004,6 +4085,10 @@ struct PlayerSettingsSheet: View {
             if let path = LyricBackgroundStore.restoreFromBackup(), lyricBackgroundImagePath != path {
                 lyricBackgroundImagePath = path
             }
+            syncPerSongLyricOffset()
+        }
+        .onChange(of: player.currentSong?.identityKey) { _ in
+            syncPerSongLyricOffset()
         }
     }
 
@@ -4328,6 +4413,39 @@ struct PlayerSettingsSheet: View {
     }
 
     /// 歌词显示卡片：字号 / 行距 / 翻译
+    /// 本首歌单独的歌词偏移（nil = 跟随全局）；打开设置页 / 切歌时同步
+    @State private var perSongLyricOffset: Double? = nil
+
+    private var perSongLyricOffsetText: String {
+        if let offset = perSongLyricOffset {
+            if offset == 0 { return "同步" }
+            return offset > 0
+                ? "提前 " + String(format: "%.1f", offset) + "s"
+                : "延后 " + String(format: "%.1f", -offset) + "s"
+        }
+        return "跟随全局"
+    }
+
+    private func syncPerSongLyricOffset() {
+        perSongLyricOffset = player.currentSong.map { LyricTiming.perSongOffset(for: $0.identityKey) } ?? nil
+    }
+
+    /// 本首歌偏移 ±0.1s 微调（首次调整从当前全局偏移起步，步进取整到 0.1s）
+    private func adjustPerSongLyricOffset(by delta: Double) {
+        guard let song = player.currentSong else { return }
+        let current = perSongLyricOffset ?? lyricOffset
+        let next = ((current + delta) * 10).rounded() / 10
+        let clamped = min(max(next, -10), 10)
+        LyricTiming.setPerSongOffset(clamped, for: song.identityKey)
+        perSongLyricOffset = clamped
+    }
+
+    private func clearPerSongLyricOffset() {
+        guard let song = player.currentSong else { return }
+        LyricTiming.setPerSongOffset(nil, for: song.identityKey)
+        perSongLyricOffset = nil
+    }
+
     private var lyricOffsetText: String {
         if lyricOffset == 0 { return "同步" }
         return lyricOffset > 0
@@ -4368,6 +4486,36 @@ struct PlayerSettingsSheet: View {
                     .font(BeansFont.appFont(12, .semibold))
                     .foregroundStyle(Color.beansAmber)
                     .buttonStyle(.plain)
+            }
+            Divider().opacity(0.5)
+            settingSlider("本首歌偏移", valueText: perSongLyricOffsetText) {
+                HStack(spacing: 16) {
+                    Button { adjustPerSongLyricOffset(by: -0.1) } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(Color.beansAmber)
+                    }
+                    .buttonStyle(.plain)
+                    Button { adjustPerSongLyricOffset(by: 0.1) } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(Color.beansAmber)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                    if perSongLyricOffset != nil {
+                        Button("跟随全局") { clearPerSongLyricOffset() }
+                            .font(BeansFont.appFont(12, .semibold))
+                            .foregroundStyle(Color.beansAmber)
+                            .buttonStyle(.plain)
+                    }
+                }
+            }
+            HStack {
+                Text("只对当前歌曲生效（±0.1s 微调）；未设置时跟随上方全局偏移")
+                    .font(BeansFont.appFont(11))
+                    .foregroundStyle(Color.beansComment)
+                Spacer()
             }
             Divider().opacity(0.5)
             settingToggle("显示歌词翻译", isOn: $lyricTranslation,
