@@ -1,5 +1,49 @@
 # Third-Party Notices
 
+## Lyric subsystem (2.2.0)
+
+The 2.2.0 lyric subsystem (`Beans/SherryLyricsMatcher.swift`,
+`Beans/SherryKugouLyrics.swift`, `Beans/SherryLRCLIB.swift`,
+`Beans/SherryLyricsCache.swift`, `Beans/SherryLyricsService.swift`,
+`Beans/SherryLyricsSyncEngine.swift`) adapts mechanisms from LyricsIsland
+by Praveet Gupta (https://github.com/M-E-L-S/LyricsIsland-driveverse,
+commit 55acc772), licensed under the MIT License:
+
+> Copyright (c) 2026 Praveet Gupta
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+> SOFTWARE.
+
+The KRC decode logic (krc1 magic, fixed 16-byte XOR key, zlib payload) was
+informed by Lyricify Lyrics Helper (https://github.com/WXRIW/Lyricify-Lyrics-Helper),
+licensed under the Apache License, Version 2.0. A copy of the Apache-2.0
+license text is available at https://www.apache.org/licenses/LICENSE-2.0.
+
+Sonar (https://github.com/can4hou6joeng4/Sonar, GPL-3.0) was read for ideas
+only (generation guard, next-track prefetch, quality fallback, 429 circuit
+breaker, synthesized word-level fallback, extrapolated lyric clock). No Sonar
+code was copied into Sherry; all playback-engine changes in 2.2.0 were
+written from scratch for this project.
+
+MusicFree (AGPL-3.0) and LX Music mobile (Apache-2.0) were read for flow
+shapes only (cache-first lookup, stale-result guards, cross-source fallback);
+no code was copied from either project.
+
 ## Complete CiliCili module (2026-09-25)
 
 `Modules/CiliCili/Sources` is a direct copy of Rone89/cilicili at

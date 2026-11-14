@@ -80,7 +80,7 @@
 - 酷狗音乐专版：每日推荐、排行榜、推荐歌单、搜索、热门搜索全部走酷狗
 - 酷狗：扫码登录 + 应用内网页登录 / Cookie 导入，同步歌单、收藏与 VIP 标识
 - 酷狗歌曲评论区、KRC 逐字歌词、歌手主页
-- 歌词与音频并行预取，版本不对自动重取；支持本首歌单独偏移校正
+- 歌词子系统 2.2.0 重建：匿名酷狗链 → LRCLIB 兜底，候选字典序匹配（标题/歌手/时长 ±3s），磁盘缓存 30 天 / 负缓存 24 小时，行级歌词合成逐字扫掠，锚点 + 外推歌词时钟；支持本首歌单独偏移校正
 
 ## 🎧 播放器：从封面里长出来的界面
 
@@ -115,8 +115,10 @@ Beans/
 ├── LibraryView.swift             音乐库（歌单 / 本地音乐库 / 最近播放）
 ├── ProfileView.swift             我的（功能 / 听歌排行 / 使用说明 / 设置）
 ├── PlayerView.swift              播放器（动态取色 / 歌词 / 底部控制 / 设置）
-├── PlayerManager.swift           播放核心（队列 / 倍速 / 定时 / 历史）
-├── KugouMusicAPI.swift           酷狗接口（搜索 / 播放地址 / 歌词 KRC / 评论 / 登录）
+├── PlayerManager.swift           播放核心（队列 / 倍速 / 定时 / 历史 / 下一首预取 / 429 熔断）
+├── KugouMusicAPI.swift           酷狗接口（搜索 / 播放地址 / 评论 / 登录）
+├── SherryLyricsService.swift / SherryKugouLyrics.swift / SherryLRCLIB.swift   歌词链路（缓存 → 酷狗匿名 → LRCLIB）
+├── SherryLyricsCache.swift / SherryLyricsMatcher.swift / SherryLyricsSyncEngine.swift   歌词缓存 / 候选匹配 / 同步时钟
 ├── KugouMusicAuth.swift / KugouLoginSheet.swift   酷狗登录（扫码 + 网页登录）
 ├── Folia/                        歌词舞台渲染（Classic / Still / 云阶 / 绘光 / 浮名）
 ├── AuthStore.swift / Models.swift   登录态与数据模型

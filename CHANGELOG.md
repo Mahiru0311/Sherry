@@ -1,5 +1,33 @@
 # Sherry 更新日志
 
+## 2.2.0
+
+### 歌词系统重建（2.1.0 诊断的根因全修）
+
+- 歌词子系统整体重写（SherryLyricsService / SherryKugouLyrics / SherryLRCLIB / SherryLyricsCache / SherryLyricsMatcher / SherryLyricsSyncEngine）：匿名酷狗链（client=pc）→ LRCLIB 兜底；搜索、下载、解码、候选选择全程记日志，不再静默失败。
+- 候选字典序匹配：标题 → 歌手 → 专辑 → 时长 ±3s → 逐字同步，标题不匹配的候选（同名 DJ 版、live、伴奏、翻唱）直接不要；只取前 3 个候选下正文。
+- 匿名链已实测验证（2026-11-15 curl 探针）：酷狗搜索歌名 + 时长可命中，/download?fmt=krc 匿名可下，krc1 + 固定 XOR + zlib 解出 33/38 行逐字标签；但"歌手 歌名" + 时长经常 0 候选，所以搜索顺序是歌名 + 时长 → 歌名 → "歌名 歌手"。
+- 磁盘歌词缓存（30 天正缓存 / 24 小时负缓存，算法版本失效）；0 行结果绝不写正缓存；旧 UserDefaults 缓存一次性迁移；在途去重——预取与播放页同一首歌只发一组请求。
+- 行级歌词无逐字时合成逐字扫掠（按字数权重分摊行时间窗前 88%，自研实现，打 synthesizedWords 标记）。
+- 歌词时钟改为锚点 + 外推（250ms 滴答 + 行切换边界滴答，抖动 ≤2s 不重锚）；0.05s 观察者继续负责进度条 UI，歌词高亮读同步引擎；本首歌偏移（co.lyricOffset.song.*，±5s）保留。
+- 删除末行时长版本校验：不再用 LRCLIB 行级歌词覆盖逐字歌词。
+
+### 播放引擎
+
+- 下一首预取：播到 5s 后或剩 ≤25s 时，下一首的歌词与音频地址一起预热，切歌直接用预取地址。
+- 429 熔断：酷狗网关返回 429 后冷却 1–60s（指数退避），冷却期内不再发播放地址请求；中途播放失败先断点续播一次（同一地址、当前进度），再失败才降音质 / 自动切歌。
+- Now Playing 更新节流：同歌同状态同秒进度 1 秒内不重复发，换歌 / 播放暂停切换直接发。
+
+### 瘦身
+
+- 删除 docs/recovery（8 个文件，194,279 B，零引用）、scripts/check-bilibili-protocol.swift（引用不存在的 BilibiliProtocol）、AddToPlaylistSheet.swift（仅自引用）、RemoteConfig.platforms、Song.init?(json:)、CoAudioQuality.level、SearchCatalogProvider 非酷狗分支、LyricWordFormat 网易/QQ 分支、ProfileView 的 co.thirdPartyAPIKeys 备份项。
+- docs/screenshots/home-light.png：RGBA 2,440,958 B → RGB 470×1024，301,076 B。
+- SimpleIcons-LICENSE.txt 保留：无法确认有无 Simple Icons 数据在用，不冒险删。
+
+### UI 轻优化（无大改版）
+
+- 空态 / 错误态上下留白收紧（48→36、40→32），空态图标 44→40；Folia 静止渲染器横向留白 48→36、底部 64→48。其余界面、导航、主题、行为不变。
+
 ## 2.1.0
 
 ### 新增与优化
