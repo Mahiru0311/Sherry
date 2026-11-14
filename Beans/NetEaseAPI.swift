@@ -308,12 +308,17 @@ final class NetEaseAPI {
         return text
     }
 
-    /// 歌词 + 翻译（tlyric），用于歌词翻译显示
-    func lyricWithTranslation(id: Int) async throws -> (lrc: String?, tlyric: String?) {
+    /// 歌词 + 翻译（tlyric）+ 逐字歌词（yrc，缺失时用 klyric），用于歌词翻译与逐字高亮显示。
+    /// 注意：公开 /api/song/lyric 探查时未见到 yrc 字段（weapi 返回可能包含）；
+    /// yrc/klyric 均为空时调用方静默回落行级歌词，绝不合成词级时间。
+    func lyricWithTranslation(id: Int) async throws -> (lrc: String?, tlyric: String?, yrc: String?) {
         let json = try await request("/api/song/lyric", payload: ["id": id, "lv": -1, "kv": -1, "tv": -1], crypto: "weapi")
         let lrc = (json["lrc"] as? [String: Any])?["lyric"] as? String
         let tlyric = (json["tlyric"] as? [String: Any])?["lyric"] as? String
-        return (lrc, tlyric)
+        let yrc = (json["yrc"] as? [String: Any])?["lyric"] as? String
+        let klyric = (json["klyric"] as? [String: Any])?["lyric"] as? String
+        let wordLevel = (yrc?.isEmpty == false) ? yrc : ((klyric?.isEmpty == false) ? klyric : nil)
+        return (lrc, tlyric, wordLevel)
     }
 
     // MARK: - 评论

@@ -386,18 +386,31 @@ struct KugouTopInfo: Identifiable, Hashable {
     let coverURL: URL?
 }
 
+/// 逐字歌词中的一个词：time 为歌曲绝对时间（秒），duration 为该词持续时长
+struct LyricWord: Hashable {
+    let time: Double
+    let duration: Double
+    let text: String
+}
+
 struct LyricLine: Identifiable, Hashable {
     let id: UUID
     let time: Double
     let text: String
     /// 歌词翻译（网易云 tlyric，可空）
     var translation: String?
+    /// 逐字时间戳（网易云 yrc/klyric、酷狗 KRC）；为空表示只有行级时间
+    var words: [LyricWord] = []
 
-    init(time: Double, text: String, translation: String? = nil) {
+    /// 是否带有真实的逐字时间戳（绝不合成/伪造词级时间）
+    var hasWordTimings: Bool { !words.isEmpty }
+
+    init(time: Double, text: String, translation: String? = nil, words: [LyricWord] = []) {
         self.id = UUID()
         self.time = time
         self.text = text
         self.translation = translation
+        self.words = words
     }
 }
 
@@ -463,10 +476,110 @@ enum LyricParser {
         }
         return times
     }
+
+    // MARK: - 逐字歌词（YRC / KRC）
+
+    /// 解析网易云逐字歌词（yrc / klyric）：行格式 `[起始ms,持续ms](词起,词持续,标志)词…`。
+    /// 词时间戳一般为绝对毫秒；个别源的词时间小于行起始时，按相对行起始处理。
+    /// 只解析真实返回的词级时间，绝不合成。
+    static func parseYRC(_ raw: String) -> [LyricLine] {
+        parseWordLevel(raw, wordTimesAreRelative: false)
+    }
+
+    /// 解析酷狗逐字歌词（KRC 解码后的文本）：行格式 `[起始ms,持续ms]<词起,词持续,标志>词…`。
+    /// KRC 的词时间是相对行起始的毫秒偏移。
+    static func parseKRC(_ raw: String) -> [LyricLine] {
+        parseWordLevel(raw, wordTimesAreRelative: true)
+    }
+
+    private static func parseWordLevel(_ raw: String, wordTimesAreRelative: Bool) -> [LyricLine] {
+        var lines: [LyricLine] = []
+        // YRC 用圆括号词段，KRC 用尖括号词段
+        let segmentPattern = wordTimesAreRelative
+            ? #"<(\d+),(\d+),\d+>([^<]*)"#
+            : #"\((\d+),(\d+),\d+\)([^\(]*)"#
+        guard let segmentRegex = try? NSRegularExpression(pattern: segmentPattern) else { return [] }
+        for rawLine in raw.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty,
+                  let headerRange = line.range(of: #"^\[\d+,\d+\]"#, options: .regularExpression) else { continue }
+            let headerText = String(line[headerRange])
+            let numbers = headerText.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Double.init)
+            guard numbers.count >= 2 else { continue }
+            let lineStart = numbers[0] / 1000.0
+            let body = String(line[headerRange.upperBound...])
+            var words: [LyricWord] = []
+            let range = NSRange(body.startIndex..., in: body)
+            segmentRegex.enumerateMatches(in: body, options: [], range: range) { match, _, _ in
+                guard let match,
+                      let startRange = Range(match.range(at: 1), in: body),
+                      let durationRange = Range(match.range(at: 2), in: body),
+                      let textRange = Range(match.range(at: 3), in: body) else { return }
+                let rawStart = (Double(body[startRange]) ?? 0) / 1000.0
+                let duration = (Double(body[durationRange]) ?? 0) / 1000.0
+                let text = String(body[textRange])
+                guard !text.isEmpty else { return }
+                let time: Double
+                if wordTimesAreRelative {
+                    time = lineStart + rawStart
+                } else if rawStart < lineStart {
+                    // 与绝对时间约定矛盾时，按相对行起始处理
+                    time = lineStart + rawStart
+                } else {
+                    time = rawStart
+                }
+                words.append(LyricWord(time: time, duration: duration, text: text))
+            }
+            guard !words.isEmpty else { continue }
+            lines.append(LyricLine(time: lineStart, text: words.map(\.text).joined(), words: words))
+        }
+        return lines.sorted { $0.time < $1.time }
+    }
+
+    /// 把逐字行的时间信息合并到普通 LRC 行上（按行起始时间匹配，误差 < 0.05s）。
+    /// 未匹配到的逐字行不单独加入，避免出现重复行；无词级时间的行保持原样。
+    static func mergingWords(_ wordLines: [LyricLine], into lines: [LyricLine]) -> [LyricLine] {
+        guard !wordLines.isEmpty, !lines.isEmpty else { return lines }
+        var merged = lines
+        for wordLine in wordLines {
+            if let idx = merged.firstIndex(where: { abs($0.time - wordLine.time) < 0.05 }) {
+                merged[idx].words = wordLine.words
+            }
+        }
+        return merged
+    }
 }
 
 enum LyricTiming {
     static let userOffsetKey = "beans.lyricOffset"
+    /// 本首歌偏移的 UserDefaults key 前缀（后接 song.identityKey）
+    static let perSongOffsetKeyPrefix = "beans.lyricOffset.song."
+
+    static func perSongOffsetKey(for identityKey: String) -> String {
+        perSongOffsetKeyPrefix + identityKey
+    }
+
+    /// 本首歌偏移（秒）；未设置返回 nil，表示跟随全局偏移
+    static func perSongOffset(for identityKey: String) -> Double? {
+        UserDefaults.standard.object(forKey: perSongOffsetKey(for: identityKey)) as? Double
+    }
+
+    static func setPerSongOffset(_ offset: Double?, for identityKey: String) {
+        let key = perSongOffsetKey(for: identityKey)
+        if let offset {
+            UserDefaults.standard.set(offset, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    /// 生效偏移：本首歌单独设置过就用本首歌的，否则用全局偏移
+    static func effectiveOffset(for identityKey: String?, globalOffset: Double) -> Double {
+        if let identityKey, let songOffset = perSongOffset(for: identityKey) {
+            return songOffset
+        }
+        return globalOffset
+    }
 
     static func effectiveProgress(_ progress: Double, userOffset: Double? = nil) -> Double {
         let offset = userOffset ?? UserDefaults.standard.double(forKey: userOffsetKey)
