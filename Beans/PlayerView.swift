@@ -1176,7 +1176,7 @@ struct PlayerView: View {
                         .onChange(of: vinylCurrentLyricIndex) { newIndex in
                             let previous = vinylLastLyricIndex
                             vinylLastLyricIndex = newIndex
-                            guard !vinylIsDraggingLyrics else { return }
+                            guard let newIndex, !vinylIsDraggingLyrics else { return }
                             let jumped = previous.map { abs(newIndex - $0) > 1 } ?? true
                             vinylScrollToCurrentLyric(proxy: proxy, animated: !(vinylPendingSeekJump || jumped))
                             vinylPendingSeekJump = false
@@ -1325,14 +1325,19 @@ struct PlayerView: View {
         .animation(.spring(response: 0.28, dampingFraction: 0.88), value: isFocused)
     }
 
-    /// 黑胶歌词行文本：焦点行有逐字时间时逐词高亮（已唱实色、未唱淡色），否则整行单色
-    private func vinylLyricLineText(_ line: LyricLine, isFocused: Bool) -> Text {
-        if isFocused, line.hasWordTimings {
-            let progress = LyricTiming.effectiveProgress(clock.lyricProgress, userOffset: effectiveLyricOffset)
-            return line.wordHighlightedText(progress: progress, active: albumTitleForeground, inactive: albumTitleForeground.opacity(0.36))
+    /// 黑胶歌词行文本：焦点行有逐字时间时逐词高亮（已唱实色、未唱淡色），否则整行单色。
+    /// 注意：返回 some View 且分支放在 Group 里——Text 若以显式 -> Text 返回，
+    /// 其上的 foregroundStyle 会解析到 iOS 17 才有的重载，在 iOS 15 部署目标下编不过。
+    private func vinylLyricLineText(_ line: LyricLine, isFocused: Bool) -> some View {
+        Group {
+            if isFocused, line.hasWordTimings {
+                let progress = LyricTiming.effectiveProgress(clock.lyricProgress, userOffset: effectiveLyricOffset)
+                line.wordHighlightedText(progress: progress, active: albumTitleColor, inactive: albumTitleColor.opacity(0.36))
+            } else {
+                Text(line.text.isEmpty ? " " : line.text)
+                    .foregroundStyle(albumTitleForeground.opacity(isFocused ? 1 : 0.36))
+            }
         }
-        return Text(line.text.isEmpty ? " " : line.text)
-            .foregroundStyle(albumTitleForeground.opacity(isFocused ? 1 : 0.36))
     }
 
     private var vinylCurrentLyricIndex: Int? {
@@ -3576,18 +3581,21 @@ struct LyricsSection: View {
         // 翻译行只展示在当前视觉焦点行下方。
         let translationText = (isCurrent && showTranslation) ? line.translation : nil
         // 当前行有逐字时间时逐词高亮（已唱行渐变色、未唱暗色），否则整行单色；
-        // 逐词高亮时不套外层 foregroundStyle，避免覆盖词级颜色
-        let lineText: Text
-        if isCurrent, line.hasWordTimings {
-            let progress = LyricTiming.effectiveProgress(clock.lyricProgress, userOffset: Double(lyricOffset))
-            lineText = line.wordHighlightedText(progress: progress, active: gradientStart ?? accent, inactive: secondary)
-        } else {
-            lineText = Text(line.text.isEmpty ? " " : line.text)
-                .foregroundStyle(lineStyle)
-        }
+        // 逐词高亮时不套外层 foregroundStyle，避免覆盖词级颜色。
+        // 注意：分支必须留在 ViewBuilder 里——Text 若以显式类型提出去，
+        // 其上的 foregroundStyle 会解析到 iOS 17 才有的重载，在 iOS 15 部署目标下编不过。
+        let hasWordHighlight = isCurrent && line.hasWordTimings
+        let wordProgress = LyricTiming.effectiveProgress(clock.lyricProgress, userOffset: Double(lyricOffset))
 
         return VStack(alignment: alignment == .leading ? .leading : .center, spacing: 3) {
-            lineText
+            Group {
+                if hasWordHighlight {
+                    line.wordHighlightedText(progress: wordProgress, active: gradientStart ?? accent, inactive: secondary)
+                } else {
+                    Text(line.text.isEmpty ? " " : line.text)
+                        .foregroundStyle(lineStyle)
+                }
+            }
                 .font(lineFont)
                 // 双层光晕：内层亮、外层宽，发光更明显
                 .shadow(
