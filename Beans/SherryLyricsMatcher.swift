@@ -40,7 +40,7 @@ value = value.replacingOccurrences(of: marker, with: "|")
 let artists = value.split(separator: "|")
 .map { collapseWhitespace(stripBracketed(String($0)))}
 .filter {!$0.isEmpty}
-return artists.isEmpty? [normalizeArtist(raw)]: artists
+return artists.isEmpty ? [normalizeArtist(raw)] : artists
 }
 
 /// 标题相等（归一化后）且版本词一致：live / 伴奏 / 翻唱 / DJ / remix
@@ -69,13 +69,13 @@ return normalizeAlbum(lhs) == normalizeAlbum(rhs)
 
 /// 缓存键用签名：时长按 5 秒分桶，同一首歌的不同上报时长共用一个缓存项。
 static func signature(title: String, artist: String, durationMs: Int?, album: String? = nil) -> String {
-let bucket = durationMs.map { Int((Double($0) / 5000.0).rounded())}?? -1
+let bucket = durationMs.map { Int((Double($0) / 5000.0).rounded()) } ?? -1
 var base = "\(normalizeTitle(title))|\(normalizeArtist(artist))|\(bucket)"
 if let album,!album.isEmpty {
 base += "|album:\(normalizeAlbum(album))"
 }
 let versions = versionTerms(in: title).sorted().joined(separator: ",")
-return versions.isEmpty? base: "\(base)|\(versions)"
+return versions.isEmpty ? base : "\(base)|\(versions)"
 }
 
 /// LRCLIB /api/search 的最佳匹配：标题归一化相等且时长 ±3 秒，优先有同步歌词的。
@@ -91,7 +91,7 @@ guard let durationMs else { return true}
 guard let duration = candidate.durationSeconds else { return false}
 return abs(duration * 1000 - Double(durationMs)) <= 3000
 }
-return matches.first { $0.element.hasSyncedLyrics}?.offset?? matches.first?.offset
+return matches.first { $0.element.hasSyncedLyrics }?.offset ?? matches.first?.offset
 }
 
 // MARK: - Helpers
@@ -141,7 +141,7 @@ let groups: [(String, [String])] = [
 ("remix", ["remix", "混音"]),
 ]
 return Set(groups.compactMap { canonical, terms in
-terms.contains(where: { text.contains($0)})? canonical: nil
+terms.contains(where: { text.contains($0) }) ? canonical : nil
 })
 }
 }
@@ -164,15 +164,15 @@ titleMatches
 
 /// 字典序：前面的属性不同时直接定胜负，绝不加权求和。
 static func < (lhs: Self, rhs: Self) -> Bool {
-if lhs.titleMatches!= rhs.titleMatches { return!lhs.titleMatches}
-if lhs.artistsMatch!= rhs.artistsMatch { return!lhs.artistsMatch}
-if lhs.albumMatches!= rhs.albumMatches { return!lhs.albumMatches}
+if lhs.titleMatches != rhs.titleMatches { return !lhs.titleMatches }
+if lhs.artistsMatch != rhs.artistsMatch { return !lhs.artistsMatch }
+if lhs.albumMatches != rhs.albumMatches { return !lhs.albumMatches }
 let lhsDurationRank = lhs.durationErrorMs <= SherryLyricsMatcher.perfectDurationToleranceMs
 ? 0: lhs.durationErrorMs
 let rhsDurationRank = rhs.durationErrorMs <= SherryLyricsMatcher.perfectDurationToleranceMs
 ? 0: rhs.durationErrorMs
-if lhsDurationRank!= rhsDurationRank { return lhsDurationRank > rhsDurationRank}
-if lhs.isWordSynced!= rhs.isWordSynced { return!lhs.isWordSynced}
+if lhsDurationRank != rhsDurationRank { return lhsDurationRank > rhsDurationRank }
+if lhs.isWordSynced != rhs.isWordSynced { return !lhs.isWordSynced }
 return false
 }
 
@@ -193,7 +193,7 @@ durationError = abs(wanted - actual)
 } else if wantedDurationMs == nil {
 durationError = 0
 } else {
-durationError =.max
+durationError = .max
 }
 return SherryLyricMatchEvaluation(
 titleMatches: SherryLyricsMatcher.titlesMatch(wantedTitle, candidateTitle),
