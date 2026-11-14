@@ -14,9 +14,15 @@ struct FoliaStillRenderer: View {
     @AppStorage(FoliaPreferences.daylightKey) private var daylight = false
     @AppStorage(FoliaPreferences.showTextKey) private var showText = true
     @AppStorage(LyricTiming.userOffsetKey) private var userOffset = 0.0
+    @EnvironmentObject private var player: PlayerManager
+
+    /// 生效的歌词偏移：本首歌单独设置过就用本首歌的，否则跟随全局
+    private var effectiveOffset: Double {
+        LyricTiming.effectiveOffset(for: player.currentSong?.identityKey, globalOffset: userOffset)
+    }
 
     private var activeIndex: Int {
-        FoliaTimeline.activeIndex(lines: document.lines, time: LyricTiming.effectiveProgress(clock.progress, userOffset: userOffset))
+        FoliaTimeline.activeIndex(lines: document.lines, time: LyricTiming.effectiveProgress(clock.progress, userOffset: effectiveOffset))
     }
 
     var body: some View {
@@ -74,7 +80,7 @@ struct FoliaStillRenderer: View {
         if active != -1 { effectiveIndex = active; return }
         // 间隙里显示“当前时间之前刚唱完的那行”，而不是滑动前留下的旧行。
         // 正常播放时两者是同一行；滑动进间隙后，旧的 held 行会是错的。
-        let now = LyricTiming.effectiveProgress(clock.progress, userOffset: userOffset)
+        let now = LyricTiming.effectiveProgress(clock.progress, userOffset: effectiveOffset)
         if let recent = FoliaTimeline.recentCompleted(lines: document.lines, activeIndex: active, time: now),
            let idx = document.lines.firstIndex(where: { $0.id == recent.id }) {
             effectiveIndex = idx

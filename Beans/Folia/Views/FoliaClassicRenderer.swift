@@ -20,11 +20,16 @@ struct FoliaClassicRenderer: View {
     @AppStorage(FoliaPreferences.classicSpacingKey) private var spacing = 0.7
     @AppStorage(LyricTiming.userOffsetKey) private var userOffset = 0.0
 
+    /// 生效的歌词偏移：本首歌单独设置过就用本首歌的，否则跟随全局
+    private var effectiveOffset: Double {
+        LyricTiming.effectiveOffset(for: player.currentSong?.identityKey, globalOffset: userOffset)
+    }
+
     private var intensity: FoliaClassicIntensity { FoliaClassicIntensity(rawValue: intensityRaw) ?? .normal }
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 30, paused: !player.isPlaying || player.isBuffering || !showText)) { _ in
-            stage(time: LyricTiming.effectiveProgress(player.currentPlaybackTime(), userOffset: userOffset))
+            stage(time: LyricTiming.effectiveProgress(player.currentPlaybackTime(), userOffset: effectiveOffset))
         }
         .allowsHitTesting(false)
     }
