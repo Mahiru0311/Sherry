@@ -500,6 +500,9 @@ struct LyricLine: Identifiable, Hashable {
     /// 可选的真实逐字时间轴；旧 LRC 缓存没有此字段时保持 nil。
     var words: [LyricWord]?
 
+    /// 是否带有真实的逐字时间戳（绝不合成/伪造词级时间）
+    var hasWordTimings: Bool { !(words?.isEmpty ?? true) }
+
     init(time: Double, text: String, translation: String? = nil, words: [LyricWord]? = nil) {
         self.id = UUID()
         self.time = time
@@ -584,9 +587,16 @@ enum LyricParser {
                     : content.endIndex
                 guard textStart <= textEnd else { continue }
                 let text = String(content[textStart..<textEnd])
-                let absoluteStart = format == .kugouKRC
-                    ? lineStart * scale + wordStart * scale
-                    : wordStart * scale
+                // KRC 的词时间是相对行起始的毫秒偏移；YRC/QRC 一般是绝对毫秒，
+                // 但个别源的词时间小于行起始时，按相对行起始处理（与绝对时间约定矛盾时）。
+                let absoluteStart: Double
+                if format == .kugouKRC {
+                    absoluteStart = lineStart * scale + wordStart * scale
+                } else if wordStart < lineStart {
+                    absoluteStart = lineStart * scale + wordStart * scale
+                } else {
+                    absoluteStart = wordStart * scale
+                }
                 words.append(LyricWord(text: text, start: absoluteStart, duration: max(wordDuration * scale, 0.001)))
             }
             let text = words.map(\.text).joined()
@@ -646,6 +656,34 @@ enum LyricParser {
 
 enum LyricTiming {
     static let userOffsetKey = "co.lyricOffset"
+    /// 本首歌偏移的 UserDefaults key 前缀（后接 song.identityKey）
+    static let perSongOffsetKeyPrefix = "co.lyricOffset.song."
+
+    static func perSongOffsetKey(for identityKey: String) -> String {
+        perSongOffsetKeyPrefix + identityKey
+    }
+
+    /// 本首歌偏移（秒）；未设置返回 nil，表示跟随全局偏移
+    static func perSongOffset(for identityKey: String) -> Double? {
+        UserDefaults.standard.object(forKey: perSongOffsetKey(for: identityKey)) as? Double
+    }
+
+    static func setPerSongOffset(_ offset: Double?, for identityKey: String) {
+        let key = perSongOffsetKey(for: identityKey)
+        if let offset {
+            UserDefaults.standard.set(offset, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    /// 生效偏移：本首歌单独设置过就用本首歌的，否则用全局偏移
+    static func effectiveOffset(for identityKey: String?, globalOffset: Double) -> Double {
+        if let identityKey, let songOffset = perSongOffset(for: identityKey) {
+            return songOffset
+        }
+        return globalOffset
+    }
 
     static func effectiveProgress(_ progress: Double, userOffset: Double? = nil) -> Double {
         let offset = userOffset ?? UserDefaults.standard.double(forKey: userOffsetKey)
