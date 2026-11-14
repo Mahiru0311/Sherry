@@ -1120,11 +1120,14 @@ struct PlayerView: View {
                                     vinylLyricLine(lyrics[index], isFocused: vinylCurrentVisualIndex == index)
                                         .id(index)
                                         .background {
-                                            GeometryReader { rowGeometry in
-                                                Color.clear.preference(
-                                                    key: LyricCenterPreferenceKey.self,
-                                                    value: [index: rowGeometry.frame(in: .named("vinylLyricsViewport")).midY]
-                                                )
+                                            // 行中心只在拖动时测量，平时不跑每行 GeometryReader
+                                            if vinylIsDraggingLyrics {
+                                                GeometryReader { rowGeometry in
+                                                    Color.clear.preference(
+                                                        key: LyricCenterPreferenceKey.self,
+                                                        value: [index: rowGeometry.frame(in: .named("vinylLyricsViewport")).midY]
+                                                    )
+                                                }
                                             }
                                         }
                                 }
@@ -3405,11 +3408,15 @@ struct LyricsSection: View {
                     ForEach(Array(lyrics.enumerated()), id: \.element.id) { index, line in
                         lyricRow(index: index, line: line)
                             .background {
-                                GeometryReader { rowGeometry in
-                                    Color.clear.preference(
-                                        key: LyricCenterPreferenceKey.self,
-                                        value: [index: rowGeometry.frame(in: .named("beansLyricsViewport")).midY]
-                                    )
+                                // 行中心只在用户拖动歌词时才测量：平时自动跟随
+                                // 只靠时间算出的 currentIndex，不需要每帧写 preference
+                                if isUserScrolling {
+                                    GeometryReader { rowGeometry in
+                                        Color.clear.preference(
+                                            key: LyricCenterPreferenceKey.self,
+                                            value: [index: rowGeometry.frame(in: .named("beansLyricsViewport")).midY]
+                                        )
+                                    }
                                 }
                             }
                             .contentShape(Rectangle())
