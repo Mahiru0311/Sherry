@@ -18,9 +18,9 @@ private func foliaContainsCJK(_ text: String) -> Bool {
 
 /// 行状态样板：各新模式共用同一套（当前行计算 + 间隙保持 + 行切换动一次）。
 /// SwiftUI 没有视图继承，各模式仍各自写这几行，保持与 FoliaStageView.swift 里现有模式一致。
-private func foliaActiveIndex(document: FoliaLyricDocument, clock: PlaybackClock, userOffset: Double) -> Int {
+private func foliaActiveIndex(document: FoliaLyricDocument, player: PlayerManager, userOffset: Double) -> Int {
     FoliaTimeline.activeIndex(lines: document.lines,
-                              time: LyricTiming.effectiveProgress(clock.progress, userOffset: userOffset))
+                              time: player.lyricTime(userOffset: userOffset))
 }
 
 // MARK: - 云阶（分段式重做）
@@ -46,7 +46,7 @@ struct FoliaPartitaView: View {
         LyricTiming.effectiveOffset(for: player.currentSong?.identityKey, globalOffset: userOffset)
     }
 
-    private var activeIndex: Int { foliaActiveIndex(document: document, clock: clock, userOffset: effectiveOffset) }
+    private var activeIndex: Int { foliaActiveIndex(document: document, player: player, userOffset: effectiveOffset) }
 
     private var currentLine: FoliaLine? {
         document.lines.indices.contains(effectiveIndex) ? document.lines[effectiveIndex] : nil
@@ -104,13 +104,14 @@ struct FoliaPartitaView: View {
         .onChange(of: activeIndex) { _, index in updateIndex(index) }
         .onChange(of: document) { _, _ in updateIndex(activeIndex) }
         .onChange(of: clock.progress) { _, _ in updateIndex(activeIndex) }
+        .onChange(of: player.lyricSyncPosition) { _, _ in updateIndex(activeIndex) }
     }
 
     private func updateIndex(_ active: Int) {
         if active != -1 { effectiveIndex = active; return }
         // 间隙里显示“当前时间之前刚唱完的那行”，而不是滑动前留下的旧行。
         // 正常播放时两者是同一行；滑动进间隙后，旧的 held 行会是错的。
-        let now = LyricTiming.effectiveProgress(clock.progress, userOffset: effectiveOffset)
+        let now = player.lyricTime(userOffset: effectiveOffset)
         if let recent = FoliaTimeline.recentCompleted(lines: document.lines, activeIndex: active, time: now),
            let idx = document.lines.firstIndex(where: { $0.id == recent.id }) {
             effectiveIndex = idx
@@ -142,7 +143,7 @@ struct FoliaLumiereView: View {
         LyricTiming.effectiveOffset(for: player.currentSong?.identityKey, globalOffset: userOffset)
     }
 
-    private var activeIndex: Int { foliaActiveIndex(document: document, clock: clock, userOffset: effectiveOffset) }
+    private var activeIndex: Int { foliaActiveIndex(document: document, player: player, userOffset: effectiveOffset) }
 
     var body: some View {
         GeometryReader { geo in
@@ -182,6 +183,7 @@ struct FoliaLumiereView: View {
         .onChange(of: activeIndex) { _, index in updateIndex(index) }
         .onChange(of: document) { _, _ in updateIndex(activeIndex) }
         .onChange(of: clock.progress) { _, _ in updateIndex(activeIndex) }
+        .onChange(of: player.lyricSyncPosition) { _, _ in updateIndex(activeIndex) }
     }
 
     @ViewBuilder private func row(offset: Int) -> some View {
@@ -214,7 +216,7 @@ struct FoliaLumiereView: View {
         if active != -1 { effectiveIndex = active; return }
         // 间隙里显示“当前时间之前刚唱完的那行”，而不是滑动前留下的旧行。
         // 正常播放时两者是同一行；滑动进间隙后，旧的 held 行会是错的。
-        let now = LyricTiming.effectiveProgress(clock.progress, userOffset: effectiveOffset)
+        let now = player.lyricTime(userOffset: effectiveOffset)
         if let recent = FoliaTimeline.recentCompleted(lines: document.lines, activeIndex: active, time: now),
            let idx = document.lines.firstIndex(where: { $0.id == recent.id }) {
             effectiveIndex = idx
@@ -244,7 +246,7 @@ struct FoliaFumeView: View {
         LyricTiming.effectiveOffset(for: player.currentSong?.identityKey, globalOffset: userOffset)
     }
 
-    private var activeIndex: Int { foliaActiveIndex(document: document, clock: clock, userOffset: effectiveOffset) }
+    private var activeIndex: Int { foliaActiveIndex(document: document, player: player, userOffset: effectiveOffset) }
 
     var body: some View {
         ZStack {
@@ -299,13 +301,14 @@ struct FoliaFumeView: View {
         .onChange(of: activeIndex) { _, index in updateIndex(index) }
         .onChange(of: document) { _, _ in updateIndex(activeIndex) }
         .onChange(of: clock.progress) { _, _ in updateIndex(activeIndex) }
+        .onChange(of: player.lyricSyncPosition) { _, _ in updateIndex(activeIndex) }
     }
 
     private func updateIndex(_ active: Int) {
         if active != -1 { effectiveIndex = active; return }
         // 间隙里显示“当前时间之前刚唱完的那行”，而不是滑动前留下的旧行。
         // 正常播放时两者是同一行；滑动进间隙后，旧的 held 行会是错的。
-        let now = LyricTiming.effectiveProgress(clock.progress, userOffset: effectiveOffset)
+        let now = player.lyricTime(userOffset: effectiveOffset)
         if let recent = FoliaTimeline.recentCompleted(lines: document.lines, activeIndex: active, time: now),
            let idx = document.lines.firstIndex(where: { $0.id == recent.id }) {
             effectiveIndex = idx

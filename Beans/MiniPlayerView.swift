@@ -23,7 +23,7 @@ struct MiniPlayerView: View {
 
     private var currentLyricLine: LyricLine? {
         guard !miniLyrics.isEmpty else { return nil }
-        let progress = LyricTiming.effectiveProgress(clock.progress, userOffset: lyricOffset)
+        let progress = player.lyricTime(userOffset: lyricOffset)
         var low = 0
         var high = miniLyrics.count - 1
         var answer: LyricLine?
@@ -162,13 +162,9 @@ struct MiniPlayerView: View {
         miniLyrics = []
         guard let song = player.currentSong else { return }
         let identity = song.identityKey
-        var raw: String?
-        if song.source == .kugou, let hash = song.kugouHash {
-            raw = await KugouMusicAPI.shared.lyric(hash: hash, duration: song.duration)
-        }
-        guard !Task.isCancelled, let raw else { return }
-        guard player.currentSong?.identityKey == identity else { return }
-        miniLyrics = LyricParser.parse(raw)
+        let lines = await player.fetchLyrics(for: song)
+        guard !Task.isCancelled, player.currentSong?.identityKey == identity else { return }
+        miniLyrics = lines
     }
 }
 

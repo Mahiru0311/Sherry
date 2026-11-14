@@ -112,11 +112,23 @@ final class PlayerManager: NSObject, ObservableObject {
     @Published private(set) var listeningDuration: TimeInterval = 0
     /// 每次用户主动拖动进度或点击歌词都会递增，歌词视图据此立即重新定位。
     @Published private(set) var seekRevision = 0
-    /// 歌词修订代次：预取完成或版本校验换掉歌词后 +1，PlayerView 据此从缓存刷新歌词。
+    /// 歌词修订代次：预取完成或歌词替换后 +1，PlayerView 据此从缓存刷新歌词。
     @Published private(set) var lyricRevision = 0
-    /// 歌词版本校验已检查过的签名：identityKey -> 音频时长（取整秒）。
-    /// coco203 是酷狗专版，没有第三方音源，签名只含时长。
-    private var lyricVersionCheckSignatures: [String: String] = [:]
+    /// 歌词同步引擎（锚点 + 外推，250ms 滴答 + 行切换边界滴答）。
+    /// 歌词高亮读 lyricTime(userOffset:)；进度条 UI 仍读 0.05s 观察者。
+    let lyricsSyncEngine = SherryLyricsSyncEngine()
+    /// 外推后的歌词时钟（秒，不含用户偏移）；false 时回退到 clock.progress。
+    @Published private(set) var lyricSyncPosition: Double = 0
+    @Published private(set) var lyricSyncActive = false
+    /// 下一首已预取的音频地址（identityKey -> URL），只保留一首。
+    private var prefetchedAudioURLs: [String: String] = [:]
+    /// 本首歌是否已触发下一首预取（播到 5s 后或剩 ≤25s 时触发一次）。
+    private var prefetchedNextSongKey: String?
+    /// 中途失败断点续播：每首歌只试一次，避免失败循环。
+    private var failureResumeSongKey: String?
+    /// Now Playing 节流：上次发布的签名与时间（同签名 1 秒内不重复发）。
+    private var lastNowPlayingSignature = ""
+    private var lastNowPlayingPublishUptime = 0.0
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -257,6 +269,9 @@ final class PlayerManager: NSObject, ObservableObject {
     override init() {
         NetworkAudioQuality.migrateConnectionAwareIfNeeded()
         super.init()
+        lyricsSyncEngine.onTick = { [weak self] position in
+            self?.lyricSyncPosition = position
+        }
         softwareVolume = min(max(defaults.object(forKey: softwareVolumeKey) as? Double ?? 1.0, 0), 1)
         // Ensure a stale auxiliary-audio category cannot carry a previous mix
         // preference into the first playback after relaunch.
@@ -301,6 +316,7 @@ final class PlayerManager: NSObject, ObservableObject {
 
     deinit {
         playbackLoadTask?.cancel()
+        lyricsSyncEngine.stopTicking()
         flushListeningDuration()
         audioRecoveryWorkItem?.cancel()
         audioSessionWatchdogTimer?.invalidate()
@@ -653,6 +669,7 @@ final class PlayerManager: NSObject, ObservableObject {
         clearAudioRecoveryIntent()
         isPlaying = false
         player?.pause()
+        lyricsSyncEngine.stopTicking()
         stopListeningSegment()
         stopAudioSessionWatchdog()
         updateNowPlaying()
@@ -710,6 +727,7 @@ final class PlayerManager: NSObject, ObservableObject {
 
     private func restartCurrent() {
         guard ensurePlaybackAllowed() else { return }
+        failureResumeSongKey = nil
         seek(to: 0)
         player?.playImmediately(atRate: Float(rate))
         isPlaying = true
@@ -738,6 +756,10 @@ final class PlayerManager: NSObject, ObservableObject {
         clearAudioRecoveryIntent()
         loadGeneration += 1
         let generation = loadGeneration
+        lyricsSyncEngine.reset()
+        lyricSyncActive = false
+        prefetchedNextSongKey = nil
+        if failureResumeSongKey != song.identityKey { failureResumeSongKey = nil }
         actualAudioQualityKey = nil
         finalizedFailureSongKey = nil
         failureAutoSkipWorkItem?.cancel()
@@ -766,31 +788,48 @@ final class PlayerManager: NSObject, ObservableObject {
             return
         }
         Task {
-            // 歌词与音频地址并行解析；歌词失败静默（PlayerView 仍会按原逻辑再取一次）
+            // 歌词与音频地址并行解析；歌词走新链路（缓存 → 酷狗匿名 → LRCLIB）。
             Task { [weak self] in
                 await self?.prefetchLyrics(for: song, generation: generation)
             }
             var urlString: String?
-            let quality = forceKugouStandard ? CoAudioQuality.standard : NetworkAudioQuality.officialPreferred
-            for attempt in 0..<3 {
-                if attempt > 0 {
-                    try? await Task.sleep(nanoseconds: 800_000_000)
-                    if Task.isCancelled { return }
-                }
-                guard generation == self.loadGeneration else { return }
-                let resolved = try? await KugouMusicAPI.shared.songURLWithActual(song: song, quality: quality)
-                urlString = resolved?.url
-                await MainActor.run {
+            // 下一首预取命中的地址直接用，不再解析一次。
+            let prefetchedURL: String? = await MainActor.run {
+                let url = self.prefetchedAudioURLs[song.identityKey]
+                self.prefetchedAudioURLs.removeValue(forKey: song.identityKey)
+                return url
+            }
+            if let prefetchedURL {
+                urlString = prefetchedURL
+                CoLogger.shared.log("播放地址命中预取：\(song.name)", level: .debug)
+            } else if KugouMusicAPI.rateLimitCooldownRemaining > 0 {
+                CoLogger.shared.log("播放地址跳过解析：429 冷却中（剩 \(Int(KugouMusicAPI.rateLimitCooldownRemaining))s）", level: .info)
+            } else {
+                let quality = forceKugouStandard ? CoAudioQuality.standard : NetworkAudioQuality.officialPreferred
+                for attempt in 0..<3 {
+                    if attempt > 0 {
+                        try? await Task.sleep(nanoseconds: 800_000_000)
+                        if Task.isCancelled { return }
+                    }
                     guard generation == self.loadGeneration else { return }
-                    self.actualAudioQualityKey = resolved?.actualKey
+                    // 熔断打开后不再重试，直接走失败处理（自动切下一首）。
+                    guard KugouMusicAPI.rateLimitCooldownRemaining <= 0 else { break }
+                    let resolved = try? await KugouMusicAPI.shared.songURLWithActual(song: song, quality: quality)
+                    urlString = resolved?.url
+                    await MainActor.run {
+                        guard generation == self.loadGeneration else { return }
+                        self.actualAudioQualityKey = resolved?.actualKey
+                    }
+                    if urlString != nil { break }
                 }
-                if urlString != nil { break }
             }
             guard let urlString, let url = URL(string: urlString) else {
                 await MainActor.run {
                     guard generation == self.loadGeneration else { return }
                     self.isBuffering = false
-                    let reason = "解析播放地址失败"
+                    let reason = KugouMusicAPI.rateLimitCooldownRemaining > 0
+                        ? "酷狗请求过于频繁，稍后再试"
+                        : "解析播放地址失败"
                     let failureMessage = coLocalized(
                         "播放失败：\(self.playbackFailureMessage(for: song, reason: reason))",
                         "Playback failed: \(self.playbackFailureMessage(for: song, reason: reason, english: true))"
@@ -815,129 +854,80 @@ final class PlayerManager: NSObject, ObservableObject {
     }
 
 
-    // MARK: - 歌词：预取 / 缓存 / 版本校验
+    // MARK: - 歌词：新链路（SherryLyricsService + 同步引擎）
+    //
+    // 旧链路（KugouMusicAPI.lyricPayload / lyricByKeyword / LRCLIB 直调 +
+    // 末行时长版本校验）已随 R1–R5 一并删除：
+    // 候选不校验、失败静默、0 行缓存投毒、预取与视图重复请求、
+    // 行级歌词覆盖逐字歌词 —— 全部由 SherryLyricsService 接管。
 
-    /// 歌词缓存键（与 PlayerView.loadLyrics 共用）：酷狗 hash，缺失时退回 identityKey。
-    static func lyricCacheKey(for song: Song) -> String {
-        "kugou:\(song.kugouHash ?? song.identityKey)"
+    /// 歌词时钟（秒，含用户偏移）：同步引擎有锚点时读外推位置，否则回退
+    /// 到 0.05s 观察者的 clock.progress。歌词高亮只读这里，进度条 UI 不动。
+    func lyricTime(userOffset: Double) -> Double {
+        let base = lyricSyncActive ? lyricSyncPosition : clock.progress
+        return LyricTiming.effectiveProgress(base, userOffset: userOffset)
     }
 
-    /// 读 LyricsCache（UserDefaults，14 天）并解析；未命中或解析为空返回 nil。
-    /// 预取与版本校验都复用这份缓存，不另建内存缓存。
+    /// 读缓存（磁盘 + 旧 UserDefaults 迁移），不发网；供 PlayerView 先渲染。
     func cachedLyrics(for song: Song) -> [LyricLine]? {
-        guard let cached = LyricsCache.shared.value(for: Self.lyricCacheKey(for: song)) else { return nil }
-        let lines = LyricParser.parse(
-            cached.lyric,
-            translationRaw: cached.translation,
-            wordRaw: cached.wordTiming,
-            wordFormat: cached.wordFormat
-        )
-        return lines.isEmpty ? nil : lines
+        SherryLyricsService.cachedLinesSync(for: song)
     }
 
-    /// 播放器内统一的歌词抓取（缓存优先，否则走酷狗接口并写缓存），供预取与 PlayerView 共用。
+    /// 播放器内统一的歌词抓取（缓存优先，否则走新链路并写缓存），供预取与 PlayerView 共用。
     func fetchLyrics(for song: Song) async -> [LyricLine] {
-        if let cached = cachedLyrics(for: song) { return cached }
-        guard song.source == .kugou, let hash = song.kugouHash else { return [] }
-        let payload = await KugouMusicAPI.shared.lyricPayload(
-            hash: hash,
-            duration: song.duration,
-            keyword: "\(song.name) \(song.artists)"
-        )
-        let lines = LyricParser.parse(payload.lrc, wordRaw: payload.krc, wordFormat: .kugouKRC)
-        if !payload.lrc.isEmpty {
-            LyricsCache.shared.save(lyric: payload.lrc, translation: nil, wordTiming: payload.krc, wordFormat: .kugouKRC, for: Self.lyricCacheKey(for: song))
-        }
-        return lines
+        await SherryLyricsService.shared.lyrics(for: song)
     }
 
     /// 与音频地址解析并行预取歌词；切歌后旧任务的结果会被代次丢弃。
+    /// 预取到歌词后喂给同步引擎，PlayerView 的 loadLyrics 会再喂一次（同一份行）。
     private func prefetchLyrics(for song: Song, generation: Int) async {
-        guard cachedLyrics(for: song) == nil else { return }
-        let lines = await fetchLyrics(for: song)
+        let lines = await SherryLyricsService.shared.lyrics(for: song)
         await MainActor.run {
             guard generation == self.loadGeneration, !lines.isEmpty else { return }
+            self.lyricsSyncEngine.setLyrics(lines)
             self.lyricRevision += 1
-            self.maybeCheckLyricVersion()
         }
     }
 
-    /// 歌词版本校验：歌词末行与音频实际时长差 > 5s 时，按歌名 + 歌手 + 时长重取一次
-    /// 歌词（LRCLIB 优先，其次酷狗内部重搜），命中更匹配的版本才替换。
-    /// 同一首歌同一音频时长只校验一次；预取完成、播放器建立、音频实际时长到达时
-    /// 各触发一次（签名去重）。coco203 是酷狗专版，没有第三方音源，不做第三方触发。
-    func maybeCheckLyricVersion() {
-        guard let song = currentSong,
-              let cached = cachedLyrics(for: song), !cached.isEmpty else { return }
-        let audioDuration = duration
-        guard audioDuration > 0 else { return }
-        let signature = "\(Int(audioDuration))"
-        guard lyricVersionCheckSignatures[song.identityKey] != signature else { return }
-        lyricVersionCheckSignatures[song.identityKey] = signature
-        let lastLyricTime = cached.last?.time ?? 0
-        guard abs(lastLyricTime - audioDuration) > 5 else { return }
-        CoLogger.shared.log("歌词版本校验：\(song.name) - \(song.artists)｜歌词末行=\(String(format: "%.1f", lastLyricTime))s 音频时长=\(String(format: "%.1f", audioDuration))s 触发重取", level: .info)
+    // MARK: - 下一首预取（音频地址 + 歌词）
+
+    /// 播到 5s 后或剩 ≤25s 时触发一次：下一首的歌词与音频地址一起预热，
+    /// 切歌时 loadCurrent 直接用预取到的地址，不再等一次解析。
+    private func maybePrefetchNextTrack() {
+        guard isPlaying, duration > 0, progress >= 5, duration - progress <= 25,
+              playMode != .repeatOne,
+              let next = nextSongForPrefetch(),
+              prefetchedNextSongKey != next.identityKey else { return }
+        prefetchedNextSongKey = next.identityKey
         Task { [weak self] in
             guard let self else { return }
-            guard let better = await Self.refetchLyricsForVersionCheck(song: song, audioDuration: audioDuration) else { return }
+            await SherryLyricsService.shared.prefetch(for: next)
+            guard !Task.isCancelled else { return }
+            guard KugouMusicAPI.rateLimitCooldownRemaining <= 0 else { return }
+            guard let resolved = try? await KugouMusicAPI.shared.songURLWithActual(
+                song: next, quality: NetworkAudioQuality.officialPreferred
+            ), let url = resolved.url, !url.isEmpty else { return }
             await MainActor.run {
-                guard self.currentSong?.identityKey == song.identityKey else { return }
-                self.lyricRevision += 1
-                CoLogger.shared.log("歌词版本校验：已替换为更匹配的版本：\(song.name)", level: .info)
+                self.prefetchedAudioURLs[next.identityKey] = url
+                CoLogger.shared.log("下一首预取完成：\(next.name)", level: .debug)
             }
         }
     }
 
-    private static func refetchLyricsForVersionCheck(song: Song, audioDuration: Double) async -> [LyricLine]? {
-        // 1) LRCLIB：按歌名 + 歌手 + 时长精确匹配（行级歌词，无逐字时间）
-        if let lines = await fetchLyricsFromLRCLIB(song: song, audioDuration: audioDuration) {
-            return lines
+    /// 顺序 / 随机播放的下一首；顺序模式播到最后一首时不预取（播完就停）。
+    private func nextSongForPrefetch() -> Song? {
+        guard !queue.isEmpty else { return nil }
+        if playMode == .sequential, currentIndex >= queue.count - 1 { return nil }
+        if playMode == .shuffle {
+            guard !playOrder.isEmpty else { return nil }
+            let nextPos = (orderPosition + 1) % playOrder.count
+            return queue[playOrder[nextPos]]
         }
-        // 2) 酷狗内部重搜：按歌名 + 歌手 + 时长再找一次候选
-        guard let payload = await KugouMusicAPI.shared.lyricByKeyword(
-            keyword: ([song.name, song.artists].filter { !$0.isEmpty }).joined(separator: " "),
-            duration: audioDuration
-        ) else { return nil }
-        let lines = LyricParser.parse(payload.lrc, wordRaw: payload.krc, wordFormat: .kugouKRC)
-        guard let last = lines.last?.time, abs(last - audioDuration) <= 5 else { return nil }
-        if !payload.lrc.isEmpty {
-            LyricsCache.shared.save(lyric: payload.lrc, translation: nil, wordTiming: payload.krc, wordFormat: .kugouKRC, for: lyricCacheKey(for: song))
-        }
-        return lines
+        let nextIndex = currentIndex + 1
+        guard queue.indices.contains(nextIndex) else { return nil }
+        return queue[nextIndex]
     }
 
-    private static func fetchLyricsFromLRCLIB(song: Song, audioDuration: Double) async -> [LyricLine]? {
-        var components = URLComponents(string: "https://lrclib.net/api/get")!
-        var items = [
-            URLQueryItem(name: "artist_name", value: song.artists),
-            URLQueryItem(name: "track_name", value: song.name),
-            URLQueryItem(name: "duration", value: String(Int(audioDuration.rounded()))),
-        ]
-        if !song.album.isEmpty {
-            items.append(URLQueryItem(name: "album_name", value: song.album))
-        }
-        components.queryItems = items
-        guard let url = components.url else { return nil }
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard (response as? HTTPURLResponse)?.statusCode == 200,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let synced = json["syncedLyrics"] as? String, !synced.isEmpty else {
-                CoLogger.shared.log("歌词版本校验：LRCLIB 无匹配：\(song.name)", level: .debug)
-                return nil
-            }
-            let lines = LyricParser.parse(synced)
-            guard let last = lines.last?.time, abs(last - audioDuration) <= 5 else {
-                CoLogger.shared.log("歌词版本校验：LRCLIB 候选仍不匹配（末行 \(String(format: "%.1f", lines.last?.time ?? 0))s），放弃", level: .debug)
-                return nil
-            }
-            LyricsCache.shared.save(lyric: synced, translation: nil, wordTiming: nil, wordFormat: nil, for: lyricCacheKey(for: song))
-            return lines
-        } catch {
-            CoLogger.shared.log("歌词版本校验：LRCLIB 请求失败：\(error.localizedDescription)", level: .debug)
-            return nil
-        }
-    }
 
     /// 在网易云按 歌名+歌手 匹配同名歌曲（QQ vkey 失败时的免费播放兜底）
     /// 仅在高音质地址已经交给 AVPlayer 但实际无法打开时回退标准音质。
@@ -1149,6 +1139,7 @@ final class PlayerManager: NSObject, ObservableObject {
         isPlaying = true
         startListeningSegment()
         isBuffering = false
+        lyricsSyncEngine.startTicking()
         startAudioSessionWatchdogIfNeeded()
         // 播放次数：原先在 loadCurrent 里预计数，URL 加载失败/手动重试也会 +1，
         // 导致统计异常；改为真正开始播放时计数。同一 load 只计一次（失败重载会换
@@ -1194,9 +1185,14 @@ final class PlayerManager: NSObject, ObservableObject {
                 let seconds = itemDuration.seconds
                 if seconds.isFinite, abs(seconds - self.duration) > 0.25 {
                     self.duration = seconds
-                    // 音频实际时长已知后，校验歌词版本是否与该音频匹配
-                    self.maybeCheckLyricVersion()
                 }
+            }
+            // 歌词时钟锚点：0.05s 观察者每次报位置都喂给同步引擎（抖动 ≤2s
+            // 保留旧锚点外推，seek / 切歌才重锚）；播到尾段触发下一首预取。
+            if time.seconds.isFinite {
+                self.lyricsSyncEngine.apply(position: time.seconds, isPlaying: self.isPlaying, duration: self.duration)
+                if !self.lyricSyncActive { self.lyricSyncActive = true }
+                self.maybePrefetchNextTrack()
             }
             let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
             if waiting != self.isBuffering {
@@ -1225,11 +1221,18 @@ final class PlayerManager: NSObject, ObservableObject {
             guard let self,
                   self.player?.currentItem === item,
                   self.currentSong?.identityKey == loadedSong.identityKey else { return }
+            // 中途失败先断点续播一次（同一地址、当前进度），只试一次；
+            // 再失败才走降音质 / 自动切歌。
+            if self.failureResumeSongKey != loadedSong.identityKey {
+                self.failureResumeSongKey = loadedSong.identityKey
+                let resume = self.progress
+                CoLogger.shared.log("播放中断：断点续播一次 \(loadedSong.name) @\(String(format: "%.1f", resume))s", level: .info)
+                self.loadCurrent(resumeAt: resume)
+                return
+            }
             if self.retryKugouAtStandardIfNeeded(error: item.error) { return }
             self.finishUnrecoverablePlaybackFailure(song: loadedSong, reason: "播放中断失败")
         }
-        // 播放器已建立：用当前已知时长（元数据或实际时长）做一次歌词版本校验
-        maybeCheckLyricVersion()
         updateNowPlaying()
     }
 
@@ -1996,6 +1999,17 @@ final class PlayerManager: NSObject, ObservableObject {
             return
         }
         guard let song = currentSong else { return }
+        // 节流（快照比较 + 最小间隔）：同一首歌 + 同一播放状态 + 同一秒进度，
+        // 1 秒内不重复发 MPNowPlayingInfo；换歌 / 播放暂停切换 / 倍速变化
+        // 会改变签名，直接发（跳过节流）。锁屏/灵动岛的进度按秒更新已足够，
+        // 逐帧发只是浪费系统调用。
+        let signature = "\(song.identityKey)|\(isPlaying ? 1 : 0)|\(rate)|\(Int(duration))|\(Int(progress))"
+        let uptime = ProcessInfo.processInfo.systemUptime
+        if signature == lastNowPlayingSignature, uptime - lastNowPlayingPublishUptime < 1.0 {
+            return
+        }
+        lastNowPlayingSignature = signature
+        lastNowPlayingPublishUptime = uptime
         let sameSong = nowPlayingSongKey == song.identityKey
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: song.name,

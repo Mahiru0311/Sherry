@@ -1,5 +1,4 @@
 import Foundation
-import Compression
 import Security
 import UIKit
 
@@ -1642,124 +1641,6 @@ final class KugouMusicAPI {
         }
     }
 
-    func lyric(hash: String, duration: TimeInterval) async -> String {
-        (await lyricPayload(hash: hash, duration: duration)).lrc
-    }
-
-    struct LyricPayload {
-        let lrc: String
-        let krc: String?
-    }
-
-    /// 酷狗歌词接口在可用时返回 KRC 逐字时间轴；失败时仍保留普通 LRC。
-    func lyricPayload(hash: String, duration: TimeInterval, keyword: String = "") async -> LyricPayload {
-        guard !hash.isEmpty else { return LyricPayload(lrc: "", krc: nil) }
-        var search = URLComponents(string: "https://lyrics.kugou.com/search")!
-        search.queryItems = [
-            URLQueryItem(name: "ver", value: "1"),
-            URLQueryItem(name: "man", value: "yes"),
-            URLQueryItem(name: "client", value: "pc"),
-            URLQueryItem(name: "keyword", value: keyword),
-            URLQueryItem(name: "hash", value: hash),
-            URLQueryItem(name: "timelength", value: "\(Int(duration * 1000))"),
-            URLQueryItem(name: "duration", value: "\(Int(duration * 1000))"),
-            URLQueryItem(name: "lrctxt", value: "1"),
-        ]
-        guard let sjson = try? await getJSON(search.url!, ua: Self.browserUA),
-              let first = (sjson["candidates"] as? [[String: Any]])?.first,
-              let id = first["id"], let accessKey = first["accesskey"] else { return LyricPayload(lrc: "", krc: nil) }
-        return await lyricPayloadFromCandidate(first, id: id, accessKey: accessKey)
-    }
-
-    /// 酷狗歌词重搜（版本校验用）：按歌名 + 歌手 + 时长搜索，不依赖 hash，
-    /// 取首个候选；调用方校验末行时间与音频时长是否匹配（±5s）才采用。
-    func lyricByKeyword(keyword: String, duration: TimeInterval) async -> LyricPayload? {
-        guard !keyword.isEmpty else { return nil }
-        var search = URLComponents(string: "https://lyrics.kugou.com/search")!
-        search.queryItems = [
-            URLQueryItem(name: "ver", value: "1"),
-            URLQueryItem(name: "man", value: "yes"),
-            URLQueryItem(name: "client", value: "pc"),
-            URLQueryItem(name: "keyword", value: keyword),
-            URLQueryItem(name: "timelength", value: "\(Int(duration * 1000))"),
-            URLQueryItem(name: "duration", value: "\(Int(duration * 1000))"),
-            URLQueryItem(name: "lrctxt", value: "1"),
-        ]
-        guard let sjson = try? await getJSON(search.url!, ua: Self.browserUA),
-              let first = (sjson["candidates"] as? [[String: Any]])?.first,
-              let id = first["id"], let accessKey = first["accesskey"] else { return nil }
-        return await lyricPayloadFromCandidate(first, id: id, accessKey: accessKey)
-    }
-
-    private func lyricPayloadFromCandidate(_ candidate: [String: Any], id: Any, accessKey: Any) async -> LyricPayload {
-        func integer(_ value: Any?) -> Int {
-            if let value = value as? Int { return value }
-            if let value = value as? NSNumber { return value.intValue }
-            return Int(String(describing: value ?? "")) ?? 0
-        }
-        let isKRC = integer(candidate["krctype"]) == 1 && integer(candidate["contenttype"]) != 1
-        let raw = await downloadLyricData(id: id, accessKey: accessKey, format: isKRC ? "krc" : "lrc")
-        if isKRC, let raw, let decoded = Self.decodeKRC(raw) {
-            return LyricPayload(lrc: decoded.lrc, krc: decoded.krc)
-        }
-        if isKRC, let lrcData = await downloadLyricData(id: id, accessKey: accessKey, format: "lrc"),
-           let lrc = String(data: lrcData, encoding: .utf8), !lrc.isEmpty {
-            return LyricPayload(lrc: lrc, krc: nil)
-        }
-        let lrc = raw.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        return LyricPayload(lrc: lrc, krc: nil)
-    }
-
-    private func downloadLyricData(id: Any, accessKey: Any, format: String) async -> Data? {
-        var request = URLComponents(string: "https://lyrics.kugou.com/download")!
-        request.queryItems = [
-            URLQueryItem(name: "ver", value: "1"),
-            URLQueryItem(name: "client", value: "pc"),
-            URLQueryItem(name: "id", value: "\(id)"),
-            URLQueryItem(name: "accesskey", value: "\(accessKey)"),
-            URLQueryItem(name: "fmt", value: format),
-            URLQueryItem(name: "charset", value: "utf8"),
-        ]
-        guard let djson = try? await getJSON(request.url!, ua: Self.browserUA),
-              let content = djson["content"] as? String,
-              let data = Data(base64Encoded: content.replacingOccurrences(of: "\n", with: "")) else { return nil }
-        return data
-    }
-
-    private static func decodeKRC(_ data: Data) -> (lrc: String, krc: String?)? {
-        guard data.count > 4 else {
-            CoLogger.shared.log("KRC 解码失败：数据过短（\(data.count) 字节）", level: .debug)
-            return nil
-        }
-        guard data.prefix(4) == Data("krc1".utf8) else {
-            CoLogger.shared.log("KRC 解码失败：缺少 krc1 魔数", level: .debug)
-            return nil
-        }
-        let key: [UInt8] = [0x40, 0x47, 0x61, 0x77, 0x5e, 0x32, 0x74, 0x47,
-                            0x51, 0x36, 0x31, 0x2d, 0xce, 0xd2, 0x6e, 0x69]
-        var encrypted = Array(data.dropFirst(4))
-        for index in encrypted.indices { encrypted[index] ^= key[index % key.count] }
-        var output = Data()
-        var capacity = max(encrypted.count * 4, 4096)
-        for _ in 0..<8 {
-            var buffer = [UInt8](repeating: 0, count: capacity)
-            let count = buffer.withUnsafeMutableBytes { destination in
-                encrypted.withUnsafeBytes { source in
-                    compression_decode_buffer(destination.bindMemory(to: UInt8.self).baseAddress!, capacity,
-                                              source.bindMemory(to: UInt8.self).baseAddress!, encrypted.count,
-                                              nil, COMPRESSION_ZLIB)
-                }
-            }
-            if count > 0 {
-                output = Data(buffer.prefix(count))
-                break
-            }
-            capacity *= 2
-        }
-        guard let text = String(data: output, encoding: .utf8), !text.isEmpty else { return nil }
-        return (text, text.contains("<") ? text : nil)
-    }
-
     // MARK: - 酷狗评论
 
     struct KugouCommentPage {
@@ -2143,6 +2024,17 @@ final class KugouMusicAPI {
         return headers
     }
 
+    /// 429 熔断：网关最近一次返回 429 的时间与连续次数；冷却 1–60s 指数退避。
+    /// 命中冷却期内 PlayerManager 不再发播放地址请求（解析循环与下一首预取
+    /// 都会查 rateLimitCooldownRemaining），避免对限流端点继续 hammer。
+    static var lastRateLimitedAt: Date?
+    static var consecutiveRateLimitCount = 0
+    static var rateLimitCooldownRemaining: TimeInterval {
+        guard let last = lastRateLimitedAt else { return 0 }
+        let cooldown = min(60, pow(2.0, Double(max(consecutiveRateLimitCount - 1, 0))))
+        return max(0, cooldown - Date().timeIntervalSince(last))
+    }
+
     private func request(_ path: String, baseURL: String, method: String, params: [String: String], body: Data?, headers: [String: String]) async throws -> RawResponse {
         guard var comps = URLComponents(string: baseURL + path) else { throw CoError.network }
         comps.queryItems = params.map { URLQueryItem(name: $0.key, value: $0.value) }
@@ -2152,7 +2044,15 @@ final class KugouMusicAPI {
         headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
         request.httpBody = body
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw CoError.network }
+        guard let http = response as? HTTPURLResponse else { throw CoError.network }
+        if http.statusCode == 429 {
+            Self.lastRateLimitedAt = Date()
+            Self.consecutiveRateLimitCount += 1
+            CoLogger.shared.log("酷狗网关 429：进入冷却 \(Int(Self.rateLimitCooldownRemaining))s（连续 \(Self.consecutiveRateLimitCount) 次）", level: .info)
+            throw CoError.network
+        }
+        guard (200..<300).contains(http.statusCode) else { throw CoError.network }
+        Self.consecutiveRateLimitCount = 0
         let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         return RawResponse(json: json, rawData: data)
     }

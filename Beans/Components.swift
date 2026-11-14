@@ -1459,7 +1459,7 @@ struct EmptyStateView: View {
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 44, weight: .light))
+                .font(.system(size: 40, weight: .light))
                 .foregroundStyle(Color.coComment)
             Text(LocalizedStringKey(text))
                 .font(CoFont.appFont(14))
@@ -1467,7 +1467,8 @@ struct EmptyStateView: View {
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 48)
+        // 2.2.0 轻优化：空态上下留白 48→36，图标 44→40，版式不变。
+        .padding(.vertical, 36)
     }
 }
 
@@ -1489,7 +1490,8 @@ struct ErrorStateView: View {
             GlassButton(title: "重试", systemName: "arrow.clockwise", action: retry)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
+        // 2.2.0 轻优化：错误态上下留白 40→32，版式不变。
+        .padding(.vertical, 32)
     }
 }
 

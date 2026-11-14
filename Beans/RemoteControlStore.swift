@@ -26,7 +26,7 @@ final class RemoteControlStore: ObservableObject {
             var request = URLRequest(url: configURL)
             request.timeoutInterval = 8
             request.cachePolicy = .reloadIgnoringLocalCacheData
-            request.setValue("Sherry/\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.1.0")", forHTTPHeaderField: "User-Agent")
+            request.setValue("Sherry/\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "2.2.0")", forHTTPHeaderField: "User-Agent")
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
             let payload = try JSONDecoder.coSnakeCase.decode(RemoteConfig.self, from: data)
@@ -116,13 +116,6 @@ private struct RemoteConfig: Decodable {
     let announcementMediaType: String?
     let announcementTextColor: String?
     let updatedAt: String?
-    let platforms: RemotePlatforms?
-}
-
-private struct RemotePlatforms: Decodable {
-    let netease: Bool?
-    let qq: Bool?
-    let kugou: Bool?
 }
 
 private extension JSONDecoder {

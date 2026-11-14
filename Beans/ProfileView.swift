@@ -2963,7 +2963,6 @@ struct SettingsView: View {
         key.hasPrefix("co.search.")
             || key.hasPrefix("co.log")
             || key.hasPrefix("co.crash")
-            || key == "co.thirdPartyAPIKeys"
             || key == "co.launchInProgress"
             || key == "co.wallpapers.deleted"
     }

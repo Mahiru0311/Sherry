@@ -34,27 +34,13 @@ private struct SearchResultCacheEntry {
 /// 搜索页可用的平台不等同于首页或账号体系的平台。附加目录只在搜索页出现，
 /// 不会改变现有首页、歌单和登录流程。
 private enum SearchCatalogProvider: String, CaseIterable, Identifiable, Hashable {
-    case aggregate = "聚合"
-    case netease = "网易云音乐"
-    case qq = "QQ音乐"
     case kugou = "酷狗音乐"
-    case kuwo = "酷我音乐"
-    case migu = "咪咕音乐"
-    case qishui = "汽水音乐"
-    case bilibili = "哔哩哔哩"
 
     var id: String { rawValue }
 
     var englishName: String {
         switch self {
-        case .aggregate: return "Aggregate"
-        case .netease: return "NetEase Cloud Music"
-        case .qq: return "QQ Music"
         case .kugou: return "Kugou Music"
-        case .kuwo: return "Kuwo Music"
-        case .migu: return "Migu Music"
-        case .qishui: return "Qishui Music"
-        case .bilibili: return "Bilibili"
         }
     }
 

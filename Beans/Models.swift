@@ -22,16 +22,6 @@ enum CoAudioQuality: String, CaseIterable, Identifiable {
         }
     }
 
-    /// 网易云 songURL 的 level 参数
-    var level: String {
-        switch self {
-        case .master:
-            return "jymaster"
-        default:
-            return rawValue
-        }
-    }
-
     /// 当前官方播放音质（默认 Hi-Res；服务端不可用时由各平台接口自行降级）。
     static var current: CoAudioQuality {
         let raw = UserDefaults.standard.string(forKey: "co.audioQuality") ?? Self.hires.rawValue
@@ -178,40 +168,6 @@ struct Song: Identifiable, Hashable, Codable {
         self.qishuiID = qishuiID
         self.bilibiliID = bilibiliID
         self.fee = fee
-    }
-
-    init?(json: [String: Any]) {
-        guard let id = json["id"] as? Int else { return nil }
-        self.id = id
-        name = json["name"] as? String ?? ""
-        let artistsArray = json["artists"] as? [[String: Any]] ?? (json["ar"] as? [[String: Any]]) ?? []
-        artists = artistsArray.compactMap { $0["name"] as? String }.joined(separator: " / ")
-        if let albumDict = json["album"] as? [String: Any] {
-            album = albumDict["name"] as? String ?? ""
-            let pic = albumDict["picUrl"] as? String ?? (albumDict["blurPicUrl"] as? String ?? "")
-            coverURL = pic.isEmpty ? nil : URL(string: pic)
-        } else if let al = json["al"] as? [String: Any] {
-            album = al["name"] as? String ?? ""
-            let pic = al["picUrl"] as? String ?? ""
-            coverURL = pic.isEmpty ? nil : URL(string: pic)
-        } else {
-            album = ""
-            coverURL = nil
-        }
-        let ms = json["duration"] as? Int ?? (json["dt"] as? Int) ?? 0
-        duration = Double(ms) / 1000.0
-        source = .netease
-        qqMid = nil
-        qqMediaMid = nil
-        kugouHash = nil
-        kugouAlbumAudioId = nil
-        kugouAlbumId = nil
-        kugouQualityHashes = nil
-        miguCopyrightId = nil
-        miguLyricURL = nil
-        qishuiID = nil
-        bilibiliID = nil
-        fee = json["fee"] as? Int ?? 0
     }
 
     private enum CodingKeys: String, CodingKey { case id, name, artists, album, coverURL, duration, source, qqMid, qqMediaMid, kugouHash, kugouAlbumAudioId, kugouAlbumId, kugouQualityHashes, miguCopyrightId, miguLyricURL, qishuiID, bilibiliID, fee }
@@ -485,9 +441,8 @@ enum LyricKaraokeTiming {
     }
 }
 
+/// 逐字歌词格式：酷狗专版只剩 KRC 一种（网易 YRC / QQ QRC 已随音源下线）。
 enum LyricWordFormat: String, Codable {
-    case neteaseYRC
-    case qqQRC
     case kugouKRC
 }
 
@@ -497,10 +452,14 @@ struct LyricLine: Identifiable, Hashable {
     let text: String
     /// 歌词翻译（网易云 tlyric，可空）
     var translation: String?
-    /// 可选的真实逐字时间轴；旧 LRC 缓存没有此字段时保持 nil。
+    /// 可选的逐字时间轴；旧 LRC 缓存没有此字段时保持 nil。
     var words: [LyricWord]?
+    /// words 是行级歌词合成的扫掠（非真实逐字时间戳）时为 true；
+    /// 真实 KRC 逐字时间时为 false。渲染共用同一套逐词高亮。
+    var synthesizedWords: Bool = false
 
-    /// 是否带有真实的逐字时间戳（绝不合成/伪造词级时间）
+    /// 是否带有逐字时间戳（真实 KRC，或行级歌词合成的扫掠；合成的用
+    /// synthesizedWords 标记，见 LyricParser.withSynthesizedWords）。
     var hasWordTimings: Bool { !(words?.isEmpty ?? true) }
 
     init(time: Double, text: String, translation: String? = nil, words: [LyricWord]? = nil) {
@@ -569,9 +528,8 @@ enum LyricParser {
                   let lineDuration = Double(rawLine[durationRange]) else { continue }
             let contentStart = rawLine.index(rawLine.startIndex, offsetBy: lineMatch.range.upperBound)
             let content = String(rawLine[contentStart...])
-            let markerPattern = format == .kugouKRC
-                ? #"<(\d+),(\d+)(?:,\d+)?>"#
-                : #"\((\d+),(\d+)(?:,\d+)?\)"#
+            // KRC 词标记 <偏移,时长,?>：词时间是相对行起始的毫秒偏移。
+            let markerPattern = #"<(\d+),(\d+)(?:,\d+)?>"#
             guard let markerRegex = try? NSRegularExpression(pattern: markerPattern) else { continue }
             let markers = markerRegex.matches(in: content, range: NSRange(content.startIndex..., in: content))
             guard !markers.isEmpty else { continue }
@@ -587,16 +545,7 @@ enum LyricParser {
                     : content.endIndex
                 guard textStart <= textEnd else { continue }
                 let text = String(content[textStart..<textEnd])
-                // KRC 的词时间是相对行起始的毫秒偏移；YRC/QRC 一般是绝对毫秒，
-                // 但个别源的词时间小于行起始时，按相对行起始处理（与绝对时间约定矛盾时）。
-                let absoluteStart: Double
-                if format == .kugouKRC {
-                    absoluteStart = lineStart * scale + wordStart * scale
-                } else if wordStart < lineStart {
-                    absoluteStart = lineStart * scale + wordStart * scale
-                } else {
-                    absoluteStart = wordStart * scale
-                }
+                let absoluteStart = lineStart * scale + wordStart * scale
                 words.append(LyricWord(text: text, start: absoluteStart, duration: max(wordDuration * scale, 0.001)))
             }
             let text = words.map(\.text).joined()
@@ -607,6 +556,76 @@ enum LyricParser {
             }
         }
         return result.sorted { $0.time < $1.time }
+    }
+
+    /// 行级歌词合成逐字扫掠（自研实现，非真实逐字时间戳）：
+    /// 只在没有任何真实逐字时间时用。把每行文本按字/词切开，按字数权重
+    /// 分摊该行时间窗的前 88%（留 12% 作行间呼吸），让逐词高亮能平滑
+    /// 走完一整行，而不是整行突然亮起。合成的行打 synthesizedWords 标记。
+    static func withSynthesizedWords(_ lines: [LyricLine]) -> [LyricLine] {
+        guard !lines.isEmpty else { return lines }
+        return lines.enumerated().map { index, line in
+            var line = line
+            guard !line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return line }
+            let nextStart = index + 1 < lines.count ? lines[index + 1].time : line.time + 4
+            let window = max(0.5, min(nextStart - line.time, 10))
+            let sweep = window * 0.88
+            let units = synthesizedUnits(line.text)
+            guard !units.isEmpty else { return line }
+            let totalWeight = units.reduce(0.0) { $0 + $1.weight }
+            guard totalWeight > 0 else { return line }
+            var cursor = line.time
+            var words: [LyricWord] = []
+            for unit in units {
+                let share = sweep * unit.weight / totalWeight
+                words.append(LyricWord(text: unit.text, start: cursor, duration: max(share, 0.001)))
+                cursor += share
+            }
+            line.words = words
+            line.synthesizedWords = true
+            return line
+        }
+    }
+
+    /// 合成扫掠的切词：每个 CJK 字自成一词；连续的拉丁字母/数字成一词；
+    /// 空格与标点粘到前一词上（行首的丢弃）。
+    private static func synthesizedUnits(_ text: String) -> [(text: String, weight: Double)] {
+        var units: [(text: String, weight: Double)] = []
+        var currentLatin = ""
+        func flushLatin() {
+            guard !currentLatin.isEmpty else { return }
+            units.append((currentLatin, Double(max(currentLatin.count, 1))))
+            currentLatin = ""
+        }
+        for ch in text {
+            if ch.isWhitespace {
+                if !currentLatin.isEmpty {
+                    currentLatin.append(ch)
+                }
+                continue
+            }
+            guard let scalar = ch.unicodeScalars.first else { continue }
+            let value = scalar.value
+            let isCJK = (0x4E00...0x9FFF).contains(value) || (0x3400...0x4DBF).contains(value)
+                || (0x3040...0x30FF).contains(value) || (0xAC00...0xD7AF).contains(value)
+            if isCJK {
+                flushLatin()
+                units.append((String(ch), 1.0))
+            } else if ch.isLetter || ch.isNumber {
+                currentLatin.append(ch)
+            } else {
+                // 标点：粘到前一词，没有前一词时自成一词。
+                if !currentLatin.isEmpty {
+                    currentLatin.append(ch)
+                } else if let last = units.indices.last {
+                    units[last].text.append(ch)
+                } else {
+                    units.append((String(ch), 0.5))
+                }
+            }
+        }
+        flushLatin()
+        return units.filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty }
     }
 
     private static func parseCore(_ raw: String, offset: Double) -> [LyricLine] {

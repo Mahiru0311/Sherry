@@ -656,9 +656,10 @@ struct PlayerView: View {
             await extractCoverPalette()
         }
         .onChange(of: player.lyricRevision) { _ in
-            // 预取完成或版本校验换掉歌词后，从缓存刷新当前歌词
+            // 预取完成或歌词替换后，从缓存刷新当前歌词
             if let song, let cached = player.cachedLyrics(for: song) {
                 lyrics = cached
+                player.lyricsSyncEngine.setLyrics(cached)
             }
         }
         .onChange(of: layoutData) { newValue in
@@ -1943,7 +1944,7 @@ struct PlayerView: View {
     @ViewBuilder
     private func vinylLyricLineText(_ line: LyricLine, isActive: Bool, visualFocus: Bool) -> some View {
         if isActive, line.hasWordTimings {
-            let progress = LyricTiming.effectiveProgress(clock.progress, userOffset: effectiveLyricOffset)
+            let progress = player.lyricTime(userOffset: effectiveLyricOffset)
             line.wordHighlightedText(progress: progress, active: albumTitleColor, inactive: albumTitleColor.opacity(0.36))
         } else {
             Text(line.text.isEmpty ? " " : line.text)
@@ -1978,7 +1979,7 @@ struct PlayerView: View {
 
     private var vinylCurrentLyricIndex: Int? {
         guard !lyrics.isEmpty else { return nil }
-        let progress = LyricTiming.effectiveProgress(clock.progress, userOffset: effectiveLyricOffset)
+        let progress = player.lyricTime(userOffset: effectiveLyricOffset)
         var low = 0
         var high = lyrics.count - 1
         var answer: Int?
@@ -2267,7 +2268,7 @@ struct PlayerView: View {
         var answer: Int?
         while low <= high {
             let mid = (low + high) / 2
-            if lyrics[mid].time <= LyricTiming.effectiveProgress(clock.progress, userOffset: effectiveLyricOffset) {
+            if lyrics[mid].time <= player.lyricTime(userOffset: effectiveLyricOffset) {
                 answer = mid
                 low = mid + 1
             } else {
@@ -3904,9 +3905,12 @@ struct PlayerView: View {
         // 优先用 PlayerManager 与音频并行预取的歌词，避免重复请求
         if let cached = player.cachedLyrics(for: song) {
             lyrics = cached
+            player.lyricsSyncEngine.setLyrics(cached)
         }
         let parsed = await player.fetchLyrics(for: song)
-        guard self.song?.identityKey == identity, !parsed.isEmpty else { return }
+        guard self.song?.identityKey == identity else { return }
+        player.lyricsSyncEngine.setLyrics(parsed)
+        guard !parsed.isEmpty else { return }
         self.lyrics = parsed
     }
 
@@ -4348,7 +4352,7 @@ struct LyricsSection: View {
         var answer: Int?
         while low <= high {
             let mid = (low + high) / 2
-            if lyrics[mid].time <= LyricTiming.effectiveProgress(clock.progress, userOffset: Double(lyricOffset)) {
+            if lyrics[mid].time <= player.lyricTime(userOffset: Double(lyricOffset)) {
                 answer = mid
                 low = mid + 1
             } else {
@@ -4577,7 +4581,7 @@ struct LyricsSection: View {
         // 逐词高亮时不套外层 foregroundStyle，避免覆盖词级颜色
         let lineText: Text
         if isCurrent, line.hasWordTimings {
-            let progress = LyricTiming.effectiveProgress(clock.progress, userOffset: Double(lyricOffset))
+            let progress = player.lyricTime(userOffset: Double(lyricOffset))
             lineText = line.wordHighlightedText(progress: progress, active: gradientStart ?? accent, inactive: secondary)
         } else {
             lineText = Text(line.text.isEmpty ? " " : line.text)

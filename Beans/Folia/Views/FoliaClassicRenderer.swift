@@ -29,7 +29,7 @@ struct FoliaClassicRenderer: View {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 30, paused: !player.isPlaying || player.isBuffering || !showText)) { _ in
-            stage(time: LyricTiming.effectiveProgress(player.currentPlaybackTime(), userOffset: effectiveOffset))
+            stage(time: player.lyricTime(userOffset: effectiveOffset))
         }
         .allowsHitTesting(false)
     }

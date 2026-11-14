@@ -678,7 +678,7 @@ struct ReferencePlaybackView: View {
 
     private var currentPlaybackLyricIndex: Int? {
         guard !lyrics.isEmpty else { return nil }
-        let progress = LyricTiming.effectiveProgress(clock.progress, userOffset: lyricOffset)
+        let progress = player.lyricTime(userOffset: lyricOffset)
         var low = 0
         var high = lyrics.count - 1
         var answer: Int?
@@ -1296,7 +1296,7 @@ struct AppleMusicLyricsSection: View {
 
     private var currentPlaybackLyricIndex: Int? {
         guard !lyrics.isEmpty else { return nil }
-        let progress = LyricTiming.effectiveProgress(clock.progress, userOffset: Double(lyricOffset))
+        let progress = player.lyricTime(userOffset: Double(lyricOffset))
         var low = 0
         var high = lyrics.count - 1
         var answer: Int?
@@ -1437,7 +1437,7 @@ struct AppleMusicLyricsSection: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 KaraokeLyricText(
                     line: line,
-                    currentTime: LyricTiming.effectiveProgress(clock.progress, userOffset: Double(lyricOffset)),
+                    currentTime: player.lyricTime(userOffset: Double(lyricOffset)),
                     isPlaying: player.isPlaying,
                     isActive: isActive,
                     enabled: karaokeEnabled,
