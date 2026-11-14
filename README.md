@@ -1,6 +1,6 @@
-# Beans Music
+# Sherry
 
-Beans Music is an open-source SwiftUI music player for iOS 15 and later. It brings several music platforms, local playlists, lyrics, downloads, and a highly configurable player into one native app.
+Sherry is an open-source SwiftUI music player for iOS 15 and later. It brings several music platforms, local playlists, lyrics, downloads, and a highly configurable player into one native app.
 
 This repository contains the public iOS client.
 
@@ -49,8 +49,8 @@ Generate the project and build an unsigned app:
 brew install xcodegen
 xcodegen generate
 xcodebuild \
-  -project Beans.xcodeproj \
-  -scheme Beans \
+  -project Sherry.xcodeproj \
+  -scheme Sherry \
   -configuration Release \
   -sdk iphoneos \
   -derivedDataPath build \

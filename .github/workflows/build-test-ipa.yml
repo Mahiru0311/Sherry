@@ -24,8 +24,8 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild \
-            -project Beans.xcodeproj \
-            -scheme Beans \
+            -project Sherry.xcodeproj \
+            -scheme Sherry \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
@@ -55,21 +55,21 @@ jobs:
       - name: Package IPA
         run: |
           mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/Beans.app Payload/
-          ditto -c -k --sequesterRsrc --keepParent Payload Beans-1.5.2-test.ipa
+          cp -R build/Build/Products/Release-iphoneos/Sherry.app Payload/
+          ditto -c -k --sequesterRsrc --keepParent Payload Sherry-1.5.2-test.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Beans-1.5.2-test-ipa
-          path: Beans-1.5.2-test.ipa
+          name: Sherry-1.5.2-test-ipa
+          path: Sherry-1.5.2-test.ipa
 
       - name: Commit test IPA
         run: |
           mkdir -p ci-builds
-          cp Beans-1.5.2-test.ipa ci-builds/Beans-1.5.2-test.ipa
+          cp Sherry-1.5.2-test.ipa ci-builds/Sherry-1.5.2-test.ipa
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f ci-builds/Beans-1.5.2-test.ipa
+          git add -f ci-builds/Sherry-1.5.2-test.ipa
           git commit -m "ci: attach test ipa [skip ci]" || exit 0
           git push
