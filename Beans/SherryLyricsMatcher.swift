@@ -151,11 +151,11 @@ enum SherryLyricsMatcher {
         // 酷狗第三方上传歌词的 singer 字段经常回显歌名（实测 "晴天" 的
         // singer 就是 "晴天"），不是歌手 —— 候选歌手与候选歌名相同时，
         // 歌手信息未知，不扣分（否则几乎所有第三方歌词都会排到后面）。
-        let artistsMatch: Bool
+        let artistsMatchValue: Bool
         if artist.isEmpty || normalizeArtist(artist) == normalizeTitle(title) {
-            artistsMatch = true
+            artistsMatchValue = true
         } else {
-            artistsMatch = artistsMatch(need.artist, artist)
+            artistsMatchValue = artistsMatch(need.artist, artist)
         }
         let albumMatches: Bool
         if let album, let needAlbum = need.album,!needAlbum.isEmpty {
@@ -172,7 +172,7 @@ enum SherryLyricsMatcher {
         return SherryLyricMatchEvaluation(
         baseTitleMatches: baseTitleMatches,
         titleMatches: titleMatches,
-        artistsMatch: artistsMatch,
+        artistsMatch: artistsMatchValue,
         albumMatches: albumMatches,
         durationErrorMs: durationError,
         isWordSynced: hasWordTimings
