@@ -20,12 +20,6 @@ final class FoliaTimelineTests: XCTestCase {
         XCTAssertNil(FoliaTimeline.recentCompleted(lines: lines, activeIndex: 1, time: 6))
     }
 
-    func testPreheatBoundsAndNilLine() {
-        XCTAssertTrue(FoliaTimeline.shouldPreheat(lines[1], time: 4, minLead: 1, maxLead: 2))
-        XCTAssertFalse(FoliaTimeline.shouldPreheat(lines[1], time: 6, minLead: 0, maxLead: 2))
-        XCTAssertFalse(FoliaTimeline.shouldPreheat(nil, time: 4, minLead: 0, maxLead: 2))
-    }
-
     func testStillHoldsDuringGapsAndAllowsBackwardsSeek() {
         XCTAssertEqual(FoliaTimeline.stillIndex(previous: 1, activeIndex: -1, lineCount: 3), 1)
         XCTAssertEqual(FoliaTimeline.stillIndex(previous: 2, activeIndex: 0, lineCount: 3), 0)

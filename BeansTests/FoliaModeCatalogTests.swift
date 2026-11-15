@@ -1,21 +1,19 @@
 import XCTest
 @testable import Sherry
 
-// A renderer must never claim equivalence merely by registering another mode's name.
+// The port ships 5 modes; anything else (old saves, upstream names) falls
+// back to .still explicitly — never a silent replacement, never a crash.
 final class FoliaModeCatalogTests: XCTestCase {
-    func testRegistryContainsAllDistinctUpstreamModes() {
-        XCTAssertEqual(FoliaVisualizerMode.allCases.count, 14)
-        XCTAssertEqual(Set(FoliaVisualizerMode.allCases.map(\.rawValue)).count, 14)
-        XCTAssertEqual(FoliaBackgroundMode.allCases.count, 6)
-        XCTAssertEqual(FoliaVisualizerMode.ordered.first, .sonnet)
+    func testRegistryContainsAllDistinctPortedModes() {
+        XCTAssertEqual(FoliaVisualizerMode.allCases.count, 5)
+        XCTAssertEqual(Set(FoliaVisualizerMode.allCases.map(\.rawValue)).count, 5)
+        XCTAssertEqual(FoliaVisualizerMode.ordered.first, .lumiere)
     }
 
-    func testUnimplementedModesAreNotSilentlyReplaced() {
+    func testUnimplementedModesFallBackToStill() {
         XCTAssertEqual(FoliaPreferences.availableMode(rawValue: "classic"), .classic)
-        XCTAssertEqual(FoliaVisualizerMode.classic.portStatus, .draft)
-        XCTAssertNil(FoliaPreferences.availableMode(rawValue: "sonnet"))
-        XCTAssertNil(FoliaPreferences.availableMode(rawValue: "mod:example:lyrics"))
+        XCTAssertEqual(FoliaPreferences.availableMode(rawValue: "sonnet"), .still)
+        XCTAssertEqual(FoliaPreferences.availableMode(rawValue: "mod:example:lyrics"), .still)
         XCTAssertEqual(FoliaPreferences.availableMode(rawValue: "still"), .still)
-        XCTAssertFalse(FoliaVisualizerMode.allCases.contains { $0.portStatus == .verified })
     }
 }
