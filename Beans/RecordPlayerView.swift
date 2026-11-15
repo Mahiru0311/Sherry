@@ -638,7 +638,6 @@ struct RecordPlayerView: View {
 /// 灰字显示“实际：X”，拿不到时不显示、不编档位（只看勾选的偏好）。
 struct CoAudioQualityMenu: View {
     @EnvironmentObject private var player: PlayerManager
-    @ObservedObject private var equalizer = CoEqualizer.shared
     @AppStorage("co.audioQuality") private var selectedRaw = CoAudioQuality.hires.rawValue
 
     static func normalized(_ quality: CoAudioQuality) -> CoAudioQuality {
@@ -685,66 +684,8 @@ struct CoAudioQualityMenu: View {
                 }
             }
         }
-        Divider()
-        Button {
-            let wasProcessing = equalizer.isEnabled || equalizer.surroundEnabled || equalizer.headphoneBoostEnabled || equalizer.vocalBoostEnabled || equalizer.widenEnabled
-            equalizer.setSurroundEnabled(!equalizer.surroundEnabled)
-            // EQ 关着时本就没有 tap 在跑：只靠重挂 audioMix 未必立即生效，
-            // 断点续播重挂一次，3D 立刻可听；EQ 开着时 tap 已在跑、改动即时生效，不用重播。
-            if !wasProcessing, equalizer.surroundEnabled {
-                player.retryCurrent()
-            }
-        } label: {
-            HStack {
-                Text("3D环绕")
-                if equalizer.surroundEnabled {
-                    Image(systemName: "checkmark")
-                }
-            }
-        }
-        Button {
-            let wasProcessing = equalizer.isEnabled || equalizer.surroundEnabled || equalizer.headphoneBoostEnabled || equalizer.vocalBoostEnabled || equalizer.widenEnabled
-            equalizer.setHeadphoneBoostEnabled(!equalizer.headphoneBoostEnabled)
-            // 与 3D 开关同理：之前没 tap 在跑时断点续播重挂一次，立刻可听。
-            if !wasProcessing, equalizer.headphoneBoostEnabled {
-                player.retryCurrent()
-            }
-        } label: {
-            HStack {
-                Text("耳机增强")
-                if equalizer.headphoneBoostEnabled {
-                    Image(systemName: "checkmark")
-                }
-            }
-        }
-        Button {
-            let wasProcessing = equalizer.isEnabled || equalizer.surroundEnabled || equalizer.headphoneBoostEnabled || equalizer.vocalBoostEnabled || equalizer.widenEnabled
-            equalizer.setVocalBoostEnabled(!equalizer.vocalBoostEnabled)
-            if !wasProcessing, equalizer.vocalBoostEnabled {
-                player.retryCurrent()
-            }
-        } label: {
-            HStack {
-                Text("人声清晰")
-                if equalizer.vocalBoostEnabled {
-                    Image(systemName: "checkmark")
-                }
-            }
-        }
-        Button {
-            let wasProcessing = equalizer.isEnabled || equalizer.surroundEnabled || equalizer.headphoneBoostEnabled || equalizer.vocalBoostEnabled || equalizer.widenEnabled
-            equalizer.setWidenEnabled(!equalizer.widenEnabled)
-            if !wasProcessing, equalizer.widenEnabled {
-                player.retryCurrent()
-            }
-        } label: {
-            HStack {
-                Text("声场加宽")
-                if equalizer.widenEnabled {
-                    Image(systemName: "checkmark")
-                }
-            }
-        }
+        // 音效开关（3D环绕/耳机增强/人声清晰/声场加宽）已移到均衡器页
+        //（EqualizerSettingsView），与均衡器共用同一套音频处理链，这里只留 4 档音质。
     }
 }
 

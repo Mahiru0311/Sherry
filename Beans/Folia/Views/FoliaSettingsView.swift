@@ -6,20 +6,21 @@ struct FoliaSettingsView: View {
     @EnvironmentObject private var theme: ThemeStore
     @AppStorage(FoliaPreferences.modeKey) private var modeRaw = FoliaVisualizerMode.still.rawValue
     @AppStorage(FoliaPreferences.fontScaleKey) private var fontScale = 1.0
-    // 翻译已删：歌词数据里翻译本就是空的（translation: nil），
-    // 显示翻译/翻译字号/翻译颜色三行是永远不起作用的死开关。
+    @AppStorage(FoliaPreferences.subtitleScaleKey) private var subtitleScale = 1.0
+    // 翻译是活的：酷狗 KRC 自带的 [language:] 翻译会按行贴到歌词上
+    //（SherryKugouLyrics.krcTranslations），有翻译的歌才显示翻译行，
+    // 无翻译的歌这行自然不出现；开关控制的是“有翻译时显不显示”。
+    @AppStorage(FoliaPreferences.translationKey) private var showTranslation = true
     @AppStorage(FoliaPreferences.daylightKey) private var daylight = false
-    @AppStorage(LyricTiming.userOffsetKey) private var lyricOffset = 0.0
-    @State private var showLyricOffsetSheet = false
     @AppStorage(FoliaPreferences.showTextKey) private var showText = true
     @AppStorage(FoliaPreferences.primaryColorKey) private var primaryHex = "#FFFFFF"
+    @AppStorage(FoliaPreferences.secondaryColorKey) private var secondaryHex = "#FFFFFF"
     @AppStorage(FoliaPreferences.accentColorKey) private var accentHex = "#A5B4FC"
     @AppStorage(FoliaPreferences.classicIntensityKey) private var intensityRaw = "normal"
     @AppStorage(FoliaPreferences.classicRotationKey) private var rotationEnabled = true
     @AppStorage(FoliaPreferences.classicBreathingKey) private var breathing = 1.0
     @AppStorage(FoliaPreferences.classicLegacyLayoutKey) private var legacy = false
     @AppStorage(FoliaPreferences.classicSpacingKey) private var wordSpacing = 0.7
-    @AppStorage("co.disableLiquidGlass") private var disableLiquidGlass = false
 
     var body: some View {
         ScrollView {
@@ -32,14 +33,6 @@ struct FoliaSettingsView: View {
                     }
                     Toggle("显示歌词", isOn: $showText)
                     Toggle("日间舞台", isOn: $daylight)
-                    Button { showLyricOffsetSheet = true } label: {
-                        HStack {
-                            Text("歌词偏移")
-                            Spacer()
-                            Text(CoLyricOffsetSheet.text(for: lyricOffset))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
                     Text("静止模式显示上一句、当前句和下一句，句间停顿保持当前位置。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
@@ -48,6 +41,10 @@ struct FoliaSettingsView: View {
                     Slider(value: $fontScale, in: 0.5...2, step: 0.05)
                     ColorPicker("歌词颜色", selection: colorBinding($primaryHex), supportsOpacity: false)
                     ColorPicker("逐词高亮颜色", selection: colorBinding($accentHex), supportsOpacity: false)
+                    Toggle("显示翻译", isOn: $showTranslation)
+                    Text("翻译/副歌词字号 \(subtitleScale, specifier: "%.2f")×")
+                    Slider(value: $subtitleScale, in: 0.5...2, step: 0.05)
+                    ColorPicker("副歌词颜色", selection: colorBinding($secondaryHex), supportsOpacity: false)
                 }
                 if modeRaw == FoliaVisualizerMode.classic.rawValue {
                     card("流光调节") {
@@ -66,28 +63,12 @@ struct FoliaSettingsView: View {
                         }
                     }
                 }
-                card("Sherry 液态外观") {
-                    Toggle("关闭液态模式", isOn: $disableLiquidGlass)
-                    Picker("全局 UI 风格", selection: Binding(get: { theme.uiStyle }, set: { theme.setUIStyle($0) })) {
-                        ForEach(CoUIStyle.allCases, id: \.self) { style in
-                            Text(style.title).tag(style)
-                        }
-                    }
-                    ColorPicker("液态容器颜色", selection: Binding(
-                        get: { theme.liquidGlassColor ?? Color(red: 0.86, green: 0.91, blue: 1) },
-                        set: { theme.setLiquidGlassColor("#" + UIColor($0).hexString) }
-                    ), supportsOpacity: false)
-                    Button("恢复清透颜色") { theme.clearLiquidGlassColor() }
-                    Text("与 Sherry 设置共用。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
             }
             .padding(16).frame(maxWidth: 760).frame(maxWidth: .infinity)
         }
         .background { GlassBackdrop(customColor: theme.backgroundSyncAll ? theme.customBackground : nil) }
         .navigationTitle("Folia")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showLyricOffsetSheet) { CoLyricOffsetSheet() }
     }
 
     private func card<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

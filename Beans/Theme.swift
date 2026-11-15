@@ -402,7 +402,12 @@ final class ThemeStore: ObservableObject {
         let savedAccent = UserDefaults.standard.string(forKey: customAccentKey)
         customAccentHex = (savedAccent?.isEmpty ?? true) ? nil : savedAccent
         let savedGlassColor = UserDefaults.standard.string(forKey: liquidGlassColorKey)
-        liquidGlassColorHex = (savedGlassColor?.isEmpty ?? true) ? nil : savedGlassColor
+        // 旧版 Folia 页存过带 "#" 的值，读入时同样归一为裸 hex（见 setLiquidGlassColor）。
+        liquidGlassColorHex = savedGlassColor.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "#", with: "")
+                .uppercased()
+        }.flatMap { $0.isEmpty ? nil : $0 }
         let legacyBackground = UserDefaults.standard.string(forKey: backgroundKey) ?? ""
         let hasSplitBackground = UserDefaults.standard.object(forKey: backgroundLightKey) != nil
             || UserDefaults.standard.object(forKey: backgroundDarkKey) != nil
@@ -533,8 +538,15 @@ final class ThemeStore: ObservableObject {
 
     /// 自定义 Beans 容器的颜色。这里只影响自定义容器叠加层，
     /// 不会改变 iOS 原生玻璃材质或系统控制本身的颜色。
+    /// 存储格式在此一处归一：去掉 "#" 前缀、统一大写裸 hex（如 "D9E8FF"），
+    /// 调用方传带 "#" 还是裸串都存成同一格式（旧版 Folia 页传 "#…"、
+    /// 主设置页传裸串，存出来的值曾不一致）。
     func setLiquidGlassColor(_ hex: String?) {
-        let normalized = hex?.isEmpty == true ? nil : hex
+        let normalized = hex.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "#", with: "")
+                .uppercased()
+        }.flatMap { $0.isEmpty ? nil : $0 }
         liquidGlassColorHex = normalized
         UserDefaults.standard.set(normalized ?? "", forKey: liquidGlassColorKey)
     }

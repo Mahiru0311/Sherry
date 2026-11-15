@@ -1456,7 +1456,6 @@ struct AccountHubSheet: View {
     @EnvironmentObject private var theme: ThemeStore
     @EnvironmentObject private var auth: AuthStore
     @ObservedObject private var kugouAuth = KugouMusicAuth.shared
-    @AppStorage("co.language") private var languageRaw = AppLanguage.chinese.rawValue
     @Environment(\.dismiss) private var dismiss
 
     @State private var showKugouLogin = false
@@ -1627,10 +1626,6 @@ struct SettingsView: View {
     private var themeMode: CoThemeMode {
         CoThemeMode(rawValue: themeModeRaw) ?? .system
     }
-
-    /// 深色模式开关（2026-10-23 用户定：设置页外观区直达入口）：复用已有存储键
-    /// beans.themeMode，不新发明键。开 = 深色，关 = 浅色；跟随系统仍走下方主题模式
-    /// 三段选择（跟随系统/浅色/深色），开关只反映“当前是否显式深色”。
 
 
 
@@ -2289,7 +2284,7 @@ struct SettingsView: View {
                             .foregroundStyle(Color.coAmber)
                             .frame(width: 28)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("底部栏显示")
+                            Text("底栏入口开关")
                                 .font(CoFont.appFont(15))
                                 .foregroundStyle(Color.coLabel)
                             Text("选择要显示的主页入口")
@@ -2448,16 +2443,6 @@ struct SettingsView: View {
 
                     Divider().overlay(Color.coComment.opacity(0.15))
 
-                    HStack {
-                        Image(systemName: "photo.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color.coAmber)
-                            .frame(width: 28)
-                        Text(coLocalized("主页背景色", "Home Background Color"))
-                            .font(CoFont.appFont(15))
-                            .foregroundStyle(Color.coLabel)
-                        Spacer()
-                    }
                     HStack {
                         Image(systemName: "circle.lefthalf.filled")
                             .font(.system(size: 14))
@@ -3489,7 +3474,7 @@ private struct TabVisibilitySettingsSheet: View {
                 }
                 .padding(16)
             }
-            .navigationTitle("底部栏显示")
+            .navigationTitle("底栏入口开关")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -3563,6 +3548,26 @@ struct EqualizerSettingsView: View {
         )
     }
 
+    /// 音效开关绑定：与旧版音质菜单里的按钮同逻辑——之前没 tap 在跑时，
+    /// 打开后断点续播重挂一次，立刻可听；已有 tap 在跑时改动即时生效。
+    private func effectBinding(
+        get: @escaping (CoEqualizer) -> Bool,
+        set: @escaping (CoEqualizer, Bool) -> Void
+    ) -> Binding<Bool> {
+        Binding(
+            get: { get(equalizer) },
+            set: { newValue in
+                let wasProcessing = equalizer.isEnabled || equalizer.surroundEnabled
+                    || equalizer.headphoneBoostEnabled || equalizer.vocalBoostEnabled
+                    || equalizer.widenEnabled
+                set(equalizer, newValue)
+                if !wasProcessing, newValue {
+                    player.retryCurrent()
+                }
+            }
+        )
+    }
+
     var body: some View {
         CoNavigationStack {
             ZStack {
@@ -3629,6 +3634,41 @@ struct EqualizerSettingsView: View {
                     }
                 }
             }
+            .toggleStyle(.switch)
+            .tint(Color.coAmber)
+
+            Divider().overlay(Color.coComment.opacity(0.14))
+
+            // 音效开关：原先在播放音质菜单（CoAudioQualityMenu）里，与均衡器
+            // 共用同一套音频处理链，移到这里与均衡器开关放一起。
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle(isOn: effectBinding(
+                    get: { $0.surroundEnabled },
+                    set: { $0.setSurroundEnabled($1) }
+                )) {
+                    Text(coLocalized("3D环绕", "3D Surround"))
+                }
+                Toggle(isOn: effectBinding(
+                    get: { $0.headphoneBoostEnabled },
+                    set: { $0.setHeadphoneBoostEnabled($1) }
+                )) {
+                    Text(coLocalized("耳机增强", "Headphone Boost"))
+                }
+                Toggle(isOn: effectBinding(
+                    get: { $0.vocalBoostEnabled },
+                    set: { $0.setVocalBoostEnabled($1) }
+                )) {
+                    Text(coLocalized("人声清晰", "Vocal Clarity"))
+                }
+                Toggle(isOn: effectBinding(
+                    get: { $0.widenEnabled },
+                    set: { $0.setWidenEnabled($1) }
+                )) {
+                    Text(coLocalized("声场加宽", "Wider Soundstage"))
+                }
+            }
+            .font(CoFont.appFont(15))
+            .foregroundStyle(Color.coLabel)
             .toggleStyle(.switch)
             .tint(Color.coAmber)
 

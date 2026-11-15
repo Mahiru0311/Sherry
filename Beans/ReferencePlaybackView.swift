@@ -498,19 +498,7 @@ struct ReferencePlaybackView: View {
             HStack(spacing: 0) {
                 favoriteActionButton()
                 Menu {
-                    Button("定时关闭", action: onSleepTimer)
-                    Button("添加到本地歌单", action: onAddToLocalPlaylist)
-                    customCoverActions
-                    Menu("播放音质") {
-                    CoAudioQualityMenu()
-                }
-                Button("播放器设置", action: onPlayerSettings)
-                    Button("歌词偏移") {
-                        showLyricOffsetSheet = true
-                    }
-                    Button("软件音量") {
-                        showSoftwareVolume = true
-                    }
+                    overflowMenuContent(includeLyricOffset: true, includeClearQueue: false)
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 17, weight: .semibold))
@@ -600,20 +588,7 @@ struct ReferencePlaybackView: View {
             favoriteActionButton()
 
             Menu {
-                Button("清空播放列表", role: .destructive) {
-                    showClearQueueConfirm = true
-                }
-                Divider()
-                Button("定时关闭", action: onSleepTimer)
-                Button("添加到本地歌单", action: onAddToLocalPlaylist)
-                customCoverActions
-                Menu("播放音质") {
-                    CoAudioQualityMenu()
-                }
-                Button("播放器设置", action: onPlayerSettings)
-                Button("软件音量") {
-                    showSoftwareVolume = true
-                }
+                overflowMenuContent(includeLyricOffset: false, includeClearQueue: true)
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 17, weight: .semibold))
@@ -627,6 +602,34 @@ struct ReferencePlaybackView: View {
             } message: {
                 Text("将清空除正在播放外的全部歌曲。")
             }
+        }
+    }
+
+    /// “···”溢出菜单的唯一实现：竖屏头与队列头此前各写了一份，
+    /// 内容只有两处不同——竖屏有“歌词偏移”，队列有“清空播放列表”，
+    /// 其余 6 项（定时关闭/添加到本地歌单/自定义封面/播放音质/播放器设置/软件音量）完全相同。
+    @ViewBuilder
+    private func overflowMenuContent(includeLyricOffset: Bool, includeClearQueue: Bool) -> some View {
+        if includeClearQueue {
+            Button("清空播放列表", role: .destructive) {
+                showClearQueueConfirm = true
+            }
+            Divider()
+        }
+        Button("定时关闭", action: onSleepTimer)
+        Button("添加到本地歌单", action: onAddToLocalPlaylist)
+        customCoverActions
+        Menu("播放音质") {
+            CoAudioQualityMenu()
+        }
+        Button("播放器设置", action: onPlayerSettings)
+        if includeLyricOffset {
+            Button("歌词偏移") {
+                showLyricOffsetSheet = true
+            }
+        }
+        Button("软件音量") {
+            showSoftwareVolume = true
         }
     }
 

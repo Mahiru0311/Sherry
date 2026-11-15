@@ -93,8 +93,6 @@ struct PlayerView: View {
     @AppStorage("co.progressBarStyle") private var progressBarStyle = 0
     /// 进度条单独强调色；空值时跟随播放控件颜色
     @AppStorage("co.progressAccentHex") private var progressAccentHex = ""
-    /// 封面页歌词预览开关：开 = 隐藏封面页歌词预览（只影响封面页，完整歌词页不受影响）；默认开，保持刚确认过的干净封面页。
-    @AppStorage("co.coverLyricsHidden") private var hideCoverLyrics = true
     /// 播放器布局自由调整：开关 + 各组件 x/y/z 数据 + 当前选中组件
     @State private var layoutMode = false
     @AppStorage("co.playerLayoutSelectedPart") private var layoutPartRaw = PlayerLayoutPart.progress.rawValue
@@ -3283,14 +3281,6 @@ struct PlayerView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Toggle("隐藏封面歌词", isOn: $hideCoverLyrics)
-                    .font(CoFont.appFont(15, .medium))
-                    .foregroundStyle(palette.text)
-                    .tint(Color.coAmber)
-                Text("只影响封面页的歌词预览，完整歌词页不受影响")
-                    .font(CoFont.appFont(12, .regular))
-                    .foregroundStyle(palette.text.opacity(0.6))
-
                 layoutEditorPartPicker
                 layoutEditorSliders
                 layoutEditorStyleDebugControls
@@ -4857,6 +4847,7 @@ struct PlayerSettingsSheet: View {
     @Binding private var layoutMode: Bool
     @AppStorage("co.lyricBackground.image") private var lyricBackgroundImagePath = ""
     @AppStorage("co.coverPlayerStyle") private var coverPlayerStyleRaw = CoCoverPlayerStyle.appleMusic.rawValue
+    @AppStorage("co.coverLyricsHidden") private var hideCoverLyrics = true
     @Environment(\.dismiss) private var dismiss
     @AppStorage("co.playerSettings.coverExpanded") private var coverExpanded = true
     @State private var showLyricBackgroundPicker = false
@@ -5072,6 +5063,21 @@ struct PlayerSettingsSheet: View {
     private var coverCard: some View {
         settingCard("封面", isExpanded: $coverExpanded) {
             coverPlayerStyleSelector
+            // 封面页歌词预览开关：开 = 隐藏封面页歌词预览（只影响封面页，
+            // 完整歌词页不受影响）；默认开，保持刚确认过的干净封面页。
+            // 原先藏在布局编辑器预览里，移到这里与封面设置放一起。
+            Toggle(isOn: $hideCoverLyrics) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("隐藏封面歌词")
+                        .font(CoFont.appFont(13, .semibold))
+                        .foregroundStyle(Color.coLabel)
+                    Text("只影响封面页的歌词预览，完整歌词页不受影响")
+                        .font(CoFont.appFont(11))
+                        .foregroundStyle(Color.coComment)
+                }
+            }
+            .toggleStyle(.switch)
+            .tint(Color.coAmber)
             Button {
                 showLyricBackgroundPicker = true
                 CoHaptics.select()
