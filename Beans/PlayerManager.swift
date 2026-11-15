@@ -901,6 +901,16 @@ final class PlayerManager: NSObject, ObservableObject {
         prefetchedNextSongKey = next.identityKey
         Task { [weak self] in
             guard let self else { return }
+            // P2-2 预取节流：与本首歌词抓取错开 1.5s，避免连续切歌时
+            // 两组搜索/下载突发打到同一限流上；本首歌词已确认失败
+            // （负缓存）时不预取下一首，不让失败批量扩散。
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            if let current = await MainActor.run(body: { self.currentSong }),
+               SherryLyricsService.cachedLinesSync(for: current)?.isEmpty == true {
+                CoLogger.shared.log("下一首预取跳过：本首歌词已失败：\(current.name)", level: .debug)
+                return
+            }
             await SherryLyricsService.shared.prefetch(for: next)
             guard !Task.isCancelled else { return }
             guard KugouMusicAPI.rateLimitCooldownRemaining <= 0 else { return }

@@ -4,7 +4,7 @@ import Foundation
 /// 机制参考 LyricsIsland (MIT) 的 LRCLIBClient，按 Sherry 模型改写。
 enum SherryLRCLIB {
     private static let baseURL = URL(string: "https://lrclib.net")!
-    private static let userAgent = "Sherry/2.2.1 (personal project)"
+    private static let userAgent = "Sherry/2.2.2 (personal project)"
     private static let timeout: TimeInterval = 15
 
     struct Response: Decodable {
@@ -19,8 +19,10 @@ enum SherryLRCLIB {
         let syncedLyrics: String?
     }
 
-    /// 兜底链：/api/get（带专辑）→ /api/get（不带专辑）→ /api/search（标题+±3 秒最佳匹配）。
+    /// 兜底链：/api/get（带专辑）→ /api/get（不带专辑）→ /api/search
+    /// （标题+歌手）→ /api/search（仅标题，无歌手串）。
     /// 404 = 无结果（继续下一环），其他错误直接抛给调用方记日志。
+    /// P1-3：/api/get 失败时（歌手串对不上是常见原因）补一次仅标题搜索。
     static func fetchLyrics(
         title: String,
         artist: String,
@@ -39,15 +41,21 @@ enum SherryLRCLIB {
                let hit = try await get(track: normTitle, artist: normArtist, album: nil, duration: durationSec) {
                 return document(from: hit, title: title, artists: [artist])
             }
-            let candidates = try await search(track: normTitle, artist: normArtist)
-            let tuples = candidates.map { (
-                trackName: $0.trackName,
-                durationSeconds: $0.duration,
-                hasSyncedLyrics: $0.syncedLyrics?.isEmpty == false
-            ) }
-            if let bestIndex = SherryLyricsMatcher.bestLRCLIBMatch(from: tuples, title: title, durationMs: durationMs) {
-                CoLogger.shared.log("歌词兜底：LRCLIB /api/search 命中 \(candidates[bestIndex].trackName ?? title)", level: .debug)
-                return document(from: candidates[bestIndex], title: title, artists: [artist])
+            if let doc = try await searchBest(
+                track: normTitle, artist: normArtist,
+                title: title, artists: [artist], durationMs: durationMs
+            ) {
+                return doc
+            }
+            // 标题-only 搜索：歌手串对不上时 /api/get 与带歌手搜索都空，
+            // 仅标题常能命中（再按标题 + 时长挑最好的）。
+            if !normArtist.isEmpty,
+               let doc = try await searchBest(
+                   track: normTitle, artist: "",
+                   title: title, artists: [artist], durationMs: durationMs
+               ) {
+                CoLogger.shared.log("歌词兜底：LRCLIB 标题-only 搜索命中 \(title)", level: .debug)
+                return doc
             }
             CoLogger.shared.log("歌词兜底：LRCLIB 无匹配：\(title) - \(artist)", level: .debug)
             return nil
@@ -55,6 +63,27 @@ enum SherryLRCLIB {
             CoLogger.shared.log("歌词兜底失败：LRCLIB \(error.localizedDescription)", level: .debug)
             return nil
         }
+    }
+
+    /// /api/search 一次：搜 → 按标题与时长挑最好的，命中返回文档。
+    private static func searchBest(
+        track: String,
+        artist: String,
+        title: String,
+        artists: [String],
+        durationMs: Int?
+    ) async throws -> SherryLyricDocument? {
+        let candidates = try await search(track: track, artist: artist)
+        let tuples = candidates.map { (
+            trackName: $0.trackName,
+            durationSeconds: $0.duration,
+            hasSyncedLyrics: $0.syncedLyrics?.isEmpty == false
+        ) }
+        if let bestIndex = SherryLyricsMatcher.bestLRCLIBMatch(from: tuples, title: title, durationMs: durationMs) {
+            CoLogger.shared.log("歌词兜底：LRCLIB /api/search 命中 \(candidates[bestIndex].trackName ?? title)", level: .debug)
+            return document(from: candidates[bestIndex], title: title, artists: artists)
+        }
+        return nil
     }
 
     private static func document(

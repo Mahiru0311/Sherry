@@ -6,6 +6,7 @@ struct SherryLyricDocument {
     enum Source: String, Codable {
         case kugou
         case lrclib
+        case kuwo
     }
 
     enum Timing: String, Codable {
@@ -36,11 +37,20 @@ struct SherryLyricDocument {
 ///
 /// 机制参考 LyricsIsland (MIT) 的 KugouLyricsProvider，KRC 解码逻辑源自
 /// Lyricify Lyrics Helper (Apache-2.0)，按 Sherry 的模型与日志改写。
-/// 实测结论（2026-11-15 curl 探针，见 CHANGELOG）：
-/// - 搜索只带歌名 + 时长能命中；"歌手 歌名" + 时长经常返回 0 候选，
-///   所以搜索顺序是：歌名+时长 → 歌名 → "歌名 歌手"。
+/// 实测结论（2026-11-16 curl 探针，见 CHANGELOG）：
+/// - 决定候选数的是 keyword 里带不带歌手：裸歌名对海阔天空/光辉岁月/
+///   小幸运返回 0 候选，"歌名 歌手" 返回 10；晴天两种都返回 10。
+///   所以搜索顺序是：歌名+歌手+时长 → 歌名+时长 → 歌名 → 歌名+歌手。
+/// - timelength（秒）/ lrctxt=1 / KG-RC / KG-THash 头 / KuGou UA 与
+///   现行 duration（毫秒）参数 A/B 对照无差异（10 vs 10、0 vs 0），
+///   主搜索不采用；只在备用端点上用 LX 同款头。
+/// - 全部探针候选的 krctype 都是 2，KRC 照常可下可解，所以 hasKRC
+///   的门改为 krctype==1 || krctype==2。
 /// - /download?fmt=krc 匿名可下，krc1 魔数 + 16 字节固定 XOR + zlib，
 ///   33/38 行带逐字标签 —— 匿名链本身是通的。
+/// - 备用端点 m.kugou.com/app/i/krc.php?cmd=100（机制参考 LX Music
+///   mobile，Apache-2.0）直接返回 LRC 正文：晴天裸歌名可取，海阔天空
+///   需带歌手才返回；主搜索 0 候选时用它兜底。
 enum SherryKugouLyrics {
     private static let searchBase = "https://lyrics.kugou.com"
     private static let userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15"
@@ -60,7 +70,9 @@ enum SherryKugouLyrics {
     struct SearchResponse: Decodable {
         struct Item: Decodable {
             let id: String
-            let accessKey: String
+            /// 缺 accesskey 的候选下不了正文：解码为 nil，调用方直接跳过，
+            /// 不让一个坏候选毁掉整批搜索结果（P2-1）。
+            let accessKey: String?
             let singer: String?
             let song: String?
             let duration: Int?
@@ -79,16 +91,50 @@ enum SherryKugouLyrics {
                 } else {
                     id = String(try values.decode(Int64.self, forKey: .id))
                 }
-                accessKey = try values.decode(String.self, forKey: .accessKey)
+                accessKey = try values.decodeIfPresent(String.self, forKey: .accessKey)
                 singer = try values.decodeIfPresent(String.self, forKey: .singer)
                 song = try values.decodeIfPresent(String.self, forKey: .song)
-                duration = try values.decodeIfPresent(Int.self, forKey: .duration)
-                krctype = try values.decodeIfPresent(Int.self, forKey: .krctype)
-                contenttype = try values.decodeIfPresent(Int.self, forKey: .contenttype)
+                duration = Self.tolerantInt(values, .duration)
+                krctype = Self.tolerantInt(values, .krctype)
+                contenttype = Self.tolerantInt(values, .contenttype)
+            }
+
+            /// duration / krctype 可能是 Int、Double 或 String：都接受，
+            /// 全失败才当缺失（P2-1）。
+            private static func tolerantInt(_ values: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> Int? {
+                if let int = try? values.decode(Int.self, forKey: key) { return int }
+                if let double = try? values.decode(Double.self, forKey: key) { return Int(double.rounded()) }
+                if let string = try? values.decode(String.self, forKey: key) {
+                    if let int = Int(string) { return int }
+                    if let double = Double(string) { return Int(double.rounded()) }
+                }
+                return nil
             }
         }
 
         let candidates: [Item]
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            // 逐个容错解码：一个坏候选（缺字段 / 类型错）只丢自己，
+            // 不让整批 candidates 解码失败（P2-1）。
+            var items: [Item] = []
+            if var array = try? values.nestedUnkeyedContainer(forKey: .candidates) {
+                while !array.isAtEnd {
+                    if let item = try? array.decode(Item.self) {
+                        items.append(item)
+                    } else {
+                        _ = try? array.decode(IgnoredValue.self)
+                    }
+                }
+            }
+            candidates = items
+        }
+
+        private enum CodingKeys: String, CodingKey { case candidates }
+
+        /// 解码时跳过的占位类型：只为消耗掉坏元素，不保留任何数据。
+        private struct IgnoredValue: Decodable {}
     }
 
     private struct DownloadResponse: Decodable {
@@ -102,14 +148,21 @@ enum SherryKugouLyrics {
         album _: String?,
         durationMs: Int?
     ) async -> [Candidate] {
-        // 探针结论："歌手 歌名" + 时长经常 0 候选；歌名 + 时长最稳。
-        // 2.2.1：第三次尝试（"歌名 歌手"）实测基本查不到，还白白烧限流
-        // 配额（连续查歌时搜索接口会限流，返回 200 空候选），直接去掉，
-        // 只留两次：歌名+时长 → 歌名。
-        let attempts: [(keyword: String, duration: Int?)] = [
-            (title, durationMs),
-            (title, nil),
-        ]
+        // 2.2.2 探针结论（2026-11-16，4 首歌 × 6 组参数）：
+        // 裸歌名对一半歌返回 0 候选，"歌名 歌手" 全部返回 10 ——
+        // 2.2.1 删掉的第三次尝试正是回归根因，恢复并提到第一位。
+        // 顺序：歌名+歌手+时长 → 歌名+时长 → 歌名 → 歌名+歌手；
+        // 一组出候选就停，最多 4 次，不烧限流配额。
+        // 只取第一位歌手（song.artists 可能是 "A|B" 的拼接串）。
+        let firstArtist = artists.flatMap { $0.split(separator: "|").map(String.init) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
+        let titleAndArtist = firstArtist.map { "\(title) \($0)" }
+        var attempts: [(keyword: String, duration: Int?)] = []
+        if let titleAndArtist { attempts.append((titleAndArtist, durationMs)) }
+        attempts.append((title, durationMs))
+        attempts.append((title, nil))
+        if let titleAndArtist { attempts.append((titleAndArtist, nil)) }
         var seen: Set<String> = []
         var out: [Candidate] = []
         for attempt in attempts {
@@ -120,15 +173,21 @@ enum SherryKugouLyrics {
                     level: .debug
                 )
                 for item in items {
+                    // 没 accesskey 的候选下不了正文，直接跳过（P2-1）。
+                    guard let accessKey = item.accessKey, !accessKey.isEmpty else { continue }
                     guard seen.insert(item.id).inserted else { continue }
                     out.append(Candidate(
                         id: item.id,
-                        accessKey: item.accessKey,
+                        accessKey: accessKey,
                         title: item.song ?? title,
                         artists: SherryLyricsMatcher.splitArtists(item.singer ?? ""),
                         album: nil,
                         durationMs: item.duration,
-                        hasKRC: (item.krctype ?? 0) == 1 && (item.contenttype ?? 0) != 1
+                        // P1-1：实测全部候选 krctype 都是 2 且 KRC 照常可下；
+                        // LX 同款判定是 krctype==1 && contenttype!=1，但 2 也能下，
+                        // 所以 1 和 2 都算有 KRC（contenttype==1 时宁取 LRC）。
+                        hasKRC: ((item.krctype ?? 0) == 1 || (item.krctype ?? 0) == 2)
+                            && (item.contenttype ?? 0) != 1
                     ))
                     if out.count >= searchLimit { return out }
                 }
@@ -138,6 +197,89 @@ enum SherryKugouLyrics {
             }
         }
         return out
+    }
+
+    /// 备用酷狗端点（m.kugou.com/app/i/krc.php?cmd=100，机制参考 LX Music
+    /// mobile，Apache-2.0）：主搜索 0 候选时用。直接返回 LRC 正文（不是
+    /// JSON），无 hash 也可用；先试"歌名 歌手"，再试裸歌名。
+    /// 探针：晴天裸歌名返回 2379 字节真词；海阔天空裸歌名返回空，
+    /// 带 Beyond 返回 354 字节真词（2026-11-16）。
+    static func backupDocument(
+        title: String,
+        artists: [String],
+        durationMs: Int?
+    ) async -> SherryLyricDocument? {
+        // 只取第一位歌手（artists 可能是 "A|B" 的拼接串）。
+        let firstArtist = artists.flatMap { $0.split(separator: "|").map(String.init) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
+        let keywords: [String] = firstArtist.map { ["\(title) \($0)", title] } ?? [title]
+        let seconds = durationMs.map { max(1, Int((Double($0) / 1000).rounded())) }
+        for keyword in keywords {
+            guard let text = await backupLyrics(keyword: keyword, seconds: seconds),
+                  SherryLyricsMatcher.hasTimestampedLines(text) else { continue }
+            let lines = LyricParser.parse(strippingWatermarkLines(text))
+            guard !lines.isEmpty else { continue }
+            let tags = krcMetadata(text)
+            CoLogger.shared.log("歌词兜底：酷狗备用端点命中 keyword=\(keyword) 行数=\(lines.count)", level: .debug)
+            return SherryLyricDocument(
+                source: .kugou,
+                timing: .synced,
+                lines: lines,
+                title: resolvedTitle(tagTitle: tags["ti"], candidateTitle: title),
+                artists: tags["ar"].map { SherryLyricsMatcher.splitArtists($0) } ?? artists,
+                album: tags["al"],
+                durationMs: durationMs,
+                rawLRC: text,
+                rawKRC: nil
+            )
+        }
+        return nil
+    }
+
+    /// 备用端点返回的水印行（如「此歌曲由 Vemus 未音 APP 制作」）不是歌词，
+    /// 解析前去掉含 "APP制作" 的行。
+    private static func strippingWatermarkLines(_ text: String) -> String {
+        text.components(separatedBy: .newlines)
+            .filter { !$0.contains("APP制作") }
+            .joined(separator: "\n")
+    }
+
+    private static func backupLyrics(keyword: String, seconds: Int?) async -> String? {
+        var components = URLComponents(string: "http://m.kugou.com/app/i/krc.php")!
+        var items = [
+            URLQueryItem(name: "cmd", value: "100"),
+            URLQueryItem(name: "keyword", value: keyword),
+        ]
+        if let seconds { items.append(URLQueryItem(name: "timelength", value: String(seconds))) }
+        items.append(URLQueryItem(name: "d", value: String(Double.random(in: 0..<1))))
+        components.queryItems = items
+        guard let url = components.url else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        request.setValue("KuGou2012-9020-ExpandSearchManager", forHTTPHeaderField: "User-Agent")
+        request.setValue("1", forHTTPHeaderField: "KG-RC")
+        request.setValue("expand_search_manager.cpp:852736169:451", forHTTPHeaderField: "KG-THash")
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            guard let text = String(data: data, encoding: .utf8), !text.isEmpty else { return nil }
+            return text
+        } catch {
+            CoLogger.shared.log("歌词兜底失败：酷狗备用端点 keyword=\(keyword) \(error.localizedDescription)", level: .debug)
+            return nil
+        }
+    }
+
+    /// KRC/LRC 头标签 [ti:] 只有与候选标题基础匹配时才采用；标签与候选
+    /// 标题对不上时（第三方歌词标签常错），保留候选标题，不让标签把
+    /// 一个本来匹配的候选推成"标题不匹配"而拒掉（P1-2）。
+    static func resolvedTitle(tagTitle: String?, candidateTitle: String) -> String {
+        guard let tagTitle, !tagTitle.isEmpty,
+              SherryLyricsMatcher.baseTitlesMatch(tagTitle, candidateTitle) else {
+            return candidateTitle
+        }
+        return tagTitle
     }
 
     private static func searchOnce(keyword: String, durationMs: Int?) async throws -> [SearchResponse.Item] {
@@ -180,7 +322,7 @@ enum SherryKugouLyrics {
             source: .kugou,
             timing: .synced,
             lines: lines,
-            title: tags["ti"] ?? candidate.title,
+            title: resolvedTitle(tagTitle: tags["ti"], candidateTitle: candidate.title),
             artists: tags["ar"].map { SherryLyricsMatcher.splitArtists($0) } ?? candidate.artists,
             album: tags["al"] ?? candidate.album,
             durationMs: candidate.durationMs ?? wantedDurationMs,
@@ -209,7 +351,7 @@ enum SherryKugouLyrics {
             source: .kugou,
             timing: wordSynced ? .wordSynced : .synced,
             lines: lines,
-            title: tags["ti"] ?? candidate.title,
+            title: resolvedTitle(tagTitle: tags["ti"], candidateTitle: candidate.title),
             artists: tags["ar"].map { SherryLyricsMatcher.splitArtists($0) } ?? candidate.artists,
             album: tags["al"] ?? candidate.album,
             durationMs: candidate.durationMs,

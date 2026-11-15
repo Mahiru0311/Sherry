@@ -44,6 +44,50 @@ MusicFree (AGPL-3.0) and LX Music mobile (Apache-2.0) were read for flow
 shapes only (cache-first lookup, stale-result guards, cross-source fallback);
 no code was copied from either project.
 
+## Lyric coverage fixes (2.2.2)
+
+The 2.2.2 lyric-coverage work ports mechanisms from LX Music mobile by
+lys whut (https://github.com/lyswhut/lx-music-mobile, snapshot 0669d1b6,
+2026-10-30), licensed under the Apache License, Version 2.0:
+
+- Kuwo search (`search.kuwo.cn/r.s`, `src/utils/musicSdk/kw/musicSearch.js`)
+  and Kuwo lyric download + decode (`mlyric.kuwo.cn/mobi.s`,
+  `src/utils/musicSdk/kw/lyric.js` `getLyric` and `kw/decodeLyric.js`:
+  `TP=content` header, zlib inflate, base64, cyclic XOR with the `yeelion`
+  key) and the Kuwo word-tag transform (`kw/util.js` `lrcTools`: `[kuwo:N]`
+  octal parameter → start/end times) — reimplemented in Swift for Sherry's
+  model in `Beans/SherryKuwoLyrics.swift` and `Beans/Models.swift`
+  (`LyricWordFormat.kuwo`).
+- Kugou backup endpoint `m.kugou.com/app/i/krc.php?cmd=100`
+  (`src/utils/musicSdk/kg/lyric.js`, commented-out legacy implementation)
+  with the `KG-RC` / `KG-THash` headers — reimplemented in
+  `Beans/SherryKugouLyrics.swift` (`backupDocument`).
+- Content-validated success (a lyric only counts when its text contains
+  timestamped lines, `src/utils/musicSdk/kw/lyric.js` `existTimeExp`),
+  per-source isolation with short timeouts, and treating HTTP 200 with
+  zero candidates as a transient failure to back off from rather than a
+  permanent miss (`src/utils/musicSdk/kg/util.js` `createHttpFetch`).
+
+The Kugou `timelength` (seconds) / `lrctxt=1` parameters and the
+`KG-RC` / `KG-THash` headers were A/B-tested against the existing
+`duration` (milliseconds) search on 2026-11-16 and showed no difference
+in candidate counts, so they were NOT adopted for the main search.
+
+A copy of the Apache-2.0 license text is available at
+https://www.apache.org/licenses/LICENSE-2.0.
+
+MusicFree (https://github.com/maotoumao/MusicFree, AGPL-3.0) was read for
+ideas only: its cross-source `searchSimilarLyric` (Levenshtein edit-distance
+matching as a last resort, `src/core/lyricManager.ts`) informed the
+edit-distance fallback in `Beans/SherryKuwoLyrics.swift` (`choose`) and
+`Beans/SherryLyricsMatcher.swift` (`editDistance`). No MusicFree code was
+copied into Sherry; the distance function is a standard dynamic-programming
+implementation written from scratch.
+
+Lyricify (https://github.com/WXRIW/Lyricify-App) is docs-only and
+closed-source: no code was borrowed; only the documented
+preferred-source / fallback-source strategy was noted.
+
 ## Complete CiliCili module (2026-09-25)
 
 `Modules/CiliCili/Sources` is a direct copy of Rone89/cilicili at

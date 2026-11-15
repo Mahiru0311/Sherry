@@ -441,9 +441,10 @@ enum LyricKaraokeTiming {
     }
 }
 
-/// 逐字歌词格式：酷狗专版只剩 KRC 一种（网易 YRC / QQ QRC 已随音源下线）。
+/// 逐字歌词格式：酷狗 KRC 与酷我逐字 LRC（`[mm:ss.xxx]<起,长>字…`）。
 enum LyricWordFormat: String, Codable {
     case kugouKRC
+    case kuwo
 }
 
 struct LyricLine: Identifiable, Hashable {
@@ -515,7 +516,79 @@ enum LyricParser {
     }
 
     private static func parseWordLines(_ raw: String, format: LyricWordFormat) -> [LyricLine] {
-        let scale: Double = 0.001
+        switch format {
+        case .kugouKRC:
+            return parseKRCWordLines(raw)
+        case .kuwo:
+            return parseKuwoWordLines(raw)
+        }
+    }
+
+    /// 酷我逐字 LRC（机制参考 LX Music mobile 的 kw/lrcTools，Apache-2.0，
+    /// 按 Sherry 的 LyricWord 模型改写）：
+    /// 行头是普通 `[mm:ss.xxx]` 时间戳，词标记是 `<a,b>`；`[kuwo:N]` 给
+    /// 出变换参数：value = Int(N, 8)，offset = value / 10，
+    /// offset2 = value % 10（N=127 → value=87 → offset=8、offset2=7）。
+    /// 词起止（毫秒）：start = |(a+b)/2/offset|，end = |(a-b)/2/offset2| + start，
+    /// 是相对行起始的偏移（与 KRC 同款语义；LX 的 lrcTools 也是把换算后的
+    /// 标记贴回行时间戳之后），绝对时间 = 行时间 + 偏移。
+    /// 后词早于前词结束时，前词截到后词起点。
+    private static func parseKuwoWordLines(_ raw: String) -> [LyricLine] {
+        var offset = 1.0
+        var offset2 = 1.0
+        for line in raw.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("[kuwo:"), trimmed.hasSuffix("]") else { continue }
+            let valueText = String(trimmed.dropFirst("[kuwo:".count).dropLast())
+            guard let value = Int(valueText, radix: 8), value > 0 else { continue }
+            let nextOffset = Double(value / 10)
+            let nextOffset2 = Double(value % 10)
+            guard nextOffset > 0, nextOffset2 > 0 else { continue }
+            offset = nextOffset
+            offset2 = nextOffset2
+        }
+        let markerPattern = #"<(-?\d+),(-?\d+)(?:,-?\d+)?>"#
+        guard let markerRegex = try? NSRegularExpression(pattern: markerPattern) else { return [] }
+        var result: [LyricLine] = []
+        for rawLine in raw.components(separatedBy: .newlines) {
+            let times = parseTimes(in: rawLine)
+            guard let lineTime = times.first else { continue }
+            let nsRange = NSRange(rawLine.startIndex..., in: rawLine)
+            let markers = markerRegex.matches(in: rawLine, range: nsRange)
+            guard !markers.isEmpty else { continue }
+            var words: [LyricWord] = []
+            for (index, marker) in markers.enumerated() {
+                guard let aRange = Range(marker.range(at: 1), in: rawLine),
+                      let bRange = Range(marker.range(at: 2), in: rawLine),
+                      let a = Double(rawLine[aRange]), let b = Double(rawLine[bRange]) else { continue }
+                let start = lineTime + abs((a + b) / 2.0 / offset) / 1000.0
+                let end = abs((a - b) / 2.0 / offset2) / 1000.0 + start
+                if let previous = words.last, start < previous.start + previous.duration {
+                    // 前词截到后词起点（LX 同款处理）。
+                    words[words.count - 1] = LyricWord(
+                        text: previous.text, start: previous.start,
+                        duration: max(start - previous.start, 0.001)
+                    )
+                }
+                let wordEnd = max(end, start + 0.001)
+                let textStart = rawLine.index(rawLine.startIndex, offsetBy: marker.range.upperBound)
+                let textEnd: String.Index = index + 1 < markers.count
+                    ? rawLine.index(rawLine.startIndex, offsetBy: markers[index + 1].range.location)
+                    : rawLine.endIndex
+                guard textStart <= textEnd else { continue }
+                let text = String(rawLine[textStart..<textEnd])
+                guard !text.isEmpty else { continue }
+                words.append(LyricWord(text: text, start: start, duration: max(wordEnd - start, 0.001)))
+            }
+            let text = words.map(\.text).joined()
+            if !text.isEmpty {
+                result.append(LyricLine(time: lineTime, text: text, words: words))
+            }
+        }
+        return result.sorted { $0.time < $1.time }
+    }
+
+    private static func parseKRCWordLines(_ raw: String) -> [LyricLine] {
         var result: [LyricLine] = []
         let linePattern = #"\[(\d+),(\d+)\]"#
         guard let lineRegex = try? NSRegularExpression(pattern: linePattern) else { return [] }

@@ -17,7 +17,9 @@ final class SherryLyricsCache {
     /// 磁盘文档格式版本：解析/存储形状一变就 +1，旧文件自然失效。
     static let formatVersion = 3
     /// 选择算法版本：匹配规则一变就 +1，旧的"赢家"不能再绕过新匹配器。
-    static let selectionAlgorithmVersion = 1
+    /// 2.2.2：1 → 2：2.2.0 的 24h 负缓存条目没有 transientNegative 字段，
+    /// 在 2.2.1 里按 24h 解码（缓存投毒跨版本残留），升版后全部失效。
+    static let selectionAlgorithmVersion = 2
 
     private struct Entry: Codable {
         let lrc: String
@@ -77,7 +79,7 @@ final class SherryLyricsCache {
     }
 
     /// 正缓存：只存非空文档。
-    func store(document: SherryLyricDocument, key: String) {
+    func store(document: SherryLyricDocument, key: String, identityKey: String? = nil) {
         guard !document.lines.isEmpty, !document.rawLRC.isEmpty else { return }
         let entry = Entry(
             lrc: document.rawLRC,
@@ -89,21 +91,53 @@ final class SherryLyricsCache {
             savedAt: Date()
         )
         store(entry: entry, key: key)
+        recordKey(key, forIdentityKey: identityKey)
     }
 
     /// 负缓存：这首歌两个源都查不到，24 小时内不再请求。
     /// transient = true 时只拦 5 分钟（限流 / 超时 / 断网等暂时失败，
     /// 不是“确实没歌词”，不能按 24 小时算）。
-    func storeNegative(key: String, transient: Bool = false) {
+    /// 2.2.2：候选下载后被匹配否决也只写 5 分钟（见 Service），24h
+    /// 只保留给明确确认无歌词的调用方；当前链路不再写 24h。
+    func storeNegative(key: String, transient: Bool = false, identityKey: String? = nil) {
         let entry = Entry(
             lrc: "", krc: nil, source: "", timing: "",
             isNegative: true, transientNegative: transient, savedAt: Date()
         )
         store(entry: entry, key: key)
+        recordKey(key, forIdentityKey: identityKey)
     }
 
     func remove(key: String) {
         try? fileManager.removeItem(at: fileURL(for: key))
+    }
+
+    /// 按歌曲身份清除全部缓存条目：缓存键里含专辑/时长桶/版本词，
+    /// 元数据稍一漂移键就变，单键删除清不掉旧条目；重试必须按
+    /// song.identityKey 清（P0-2）。
+    func removeAll(forIdentityKey identityKey: String) {
+        let defaultsKey = Self.indexDefaultsKey(for: identityKey)
+        let keys = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
+        for key in keys {
+            try? fileManager.removeItem(at: fileURL(for: key))
+        }
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+    }
+
+    /// 记下某首歌写过哪些缓存键（UserDefaults 索引，上限 8 个），
+    /// 供 removeAll(forIdentityKey:) 用；索引本身不含歌词内容。
+    private func recordKey(_ key: String, forIdentityKey identityKey: String?) {
+        guard let identityKey, !identityKey.isEmpty else { return }
+        let defaultsKey = Self.indexDefaultsKey(for: identityKey)
+        var keys = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
+        keys.removeAll { $0 == key }
+        keys.append(key)
+        if keys.count > 8 { keys.removeFirst(keys.count - 8) }
+        UserDefaults.standard.set(keys, forKey: defaultsKey)
+    }
+
+    private static func indexDefaultsKey(for identityKey: String) -> String {
+        "co.lyrics.cache.keys." + identityKey
     }
 
     func clear() {
