@@ -1,5 +1,38 @@
 # Sherry 更新日志
 
+## 2.2.3
+
+### 标签泄漏：歌词页出现 `<3780,-3780>` 原始词标记（2.2.2 真机实测）
+
+- **根因**：酷我 lrcx 词标记是合法的和/差编码（`[kuwo:073]` 参数换算，129 个负时长标签与截图逐字节一致），首屏解析时 Kuwo 会剥掉标签，但缓存存的是带标签的 `rawLRC` + `rawKRC = nil`，重载走纯 LRC 路径、`parseCore` 又从不剥 `<…>` 标签，标签直达渲染。
+- **修复**：`parseCore` 剥掉所有 `<起,长>` 词标记（最后一道防线，任何路径的行文本都不再含标签）；`parseKRCWordLines` 接受可选负号并钳制起点/时长、丢弃仍非法的词，显示文本只由解析出的词拼成；酷我缓存改存 `rawLRC = 去标签文本` + `rawKRC = 带标签原文`；缓存重载按来源分发（酷我 → `.kuwo`、酷狗 KRC → `.kugouKRC`、其余纯 LRC）；缓存格式版本 3 → 4，2.2.2 的毒条目全部失效。
+- **兜底规则**：逐字同步跟不上时回落到干净的行级显示（或既有无歌词态），永不渲染原始标签；`finalize()` 合成扫掠在已剥标签的文本上做。2.2.1 的延迟修复与每首歌偏移未动。
+- **回归测试**：带 `<3780,-3780>` 的行渲染零 `<`/`>`；负时长钳制/丢弃；酷我缓存存取往返后文本干净且带逐字时间。
+
+### 瘦身
+
+- `Localizable.strings`（zh-Hans/en）：删除 grep 无任何引用证据的键（zh 1044 → 389，en 1049 → 388），主要是 QQ/网易时代的日志格式串；保留的键都有 Swift 字面量证据（含 `Text`/`LocalizedStringKey` 的隐式查表，不只 `NSLocalizedString`）。
+- `RemoteControlStore`：删除公告写入（全仓库 0 处读取）与死函数 `set()`/`rememberOriginal()`/`restore()`；远端配置拉取本身保留。
+- `KugouMusicAPI.qualityHashCandidates`：两份重复实现合并为共用 `qualityOrder`。
+- `Song`：删除死字段 `miguCopyrightId`/`qqMid`/`qqMediaMid`（及 KugouMusicAPI 里的写时复制）。
+- `CoAudioQuality`：删除幽灵档 `higher`/`master`（菜单只提供 4 档）；历史存量经 `rawValue` 初始化失败回退 `.hires`。
+- 删除过期根文档 `docs/bilibili-native-implementation.md`、`SOURCE_ANALYSIS.md`、`TASKS.md`、`PROGRESS.md`；`MAC_REBUILD_INSTRUCTIONS.md` 保留。`SongSource` 死分支未删：`netease` 仍在用（歌手页默认 + 解码回退），`qq`/`kuwo`/`migu` 在多个穷尽 switch 里，删了是 churn。
+
+### 音质
+
+- ABR 恢复：降档后不再永远停在低档——5 分钟无卡顿，或连续 2 首歌无卡顿，切歌时把偏好恢复到降档前那一档并记日志 + 轻提示；用户手动改过音质则不再自动恢复；记录持久化，重启后也不丢。
+- 主播放页 `···` 菜单新增“实际音质：X”行（RecordPlayerView 同款显示方式）。
+
+### 动画与 iOS 适配（布局/结构/导航/主题不变）
+
+- Folia 经典逐词：5 处叠加 `.animation` 合并为一处 `spring(0.30/0.85)`（进行中保持插值弹簧），5s 线性旋转淡出删除，等待位移 140/70 → 40/24，模糊 14 → 8。
+- 板块进入：easeOut 0.5 → spring(0.35/0.85)，错峰延迟上限 0.15s；三处切歌飞出统一为弹簧出入、距离跟随视口宽度 ×1.25；调色板过渡 0.45 → spring(0.35/0.86)。
+- 控制栏显隐、设置关闭、引导页翻页改 snappy(0.28)；歌曲行入场、封面脉冲改弹簧；均衡器三条柱改非对称时长；Folia 行过渡移除缩放 1.2/模糊 28 → 1.0/16；Still 渲染器弹簧统一 0.38/0.8。
+- 歌词点选延迟 220ms → 120ms；iPad 旋转弹簧 0.42 → 0.35；暂停分支 `.default` → nil；封面交叉溶解 0.4 → 0.3s。
+- 灵动岛紧凑左侧跟随播放状态；我的页顶部安全区不再写死 59（关键窗口 → 任一窗口 → 按机型估算）；TabBar 的 UIKit 配置器只保留首页长按手势，外观由 SwiftUI 侧负责；Tab 图标 25pt 跟随动态字体缩放。
+- 弹窗玻璃统一：`CoSheetModifier` 全套（detents + 拖拽指示 + clear 背景 + 圆角 28），板块排序与歌词偏移表同步补齐。
+- 减弱动态效果：均衡器、流光进度点、封面呼吸动画加门；微光（shimmer）本来已有门，未动。
+
 ## 2.2.2
 
 ### 三分之二的歌没有歌词：根因定位并修复（2.2.1 真机实测仍有大量无词）

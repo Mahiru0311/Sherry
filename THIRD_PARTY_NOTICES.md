@@ -252,3 +252,79 @@ The full upstream GPL-3.0 text is retained verbatim in
 `Beans/Resources/CiliCili-LICENSE.txt`, with attribution and source retrieval
 information in `Beans/Resources/CiliCili-NOTICE.md`; both are included in the IPA.
 
+
+## Borrowed mechanisms (2.2.3)
+
+The 2.2.3 lyric work documents four more projects whose mechanisms were
+read while diagnosing the 2.2.2 word-tag leak and the lyric-cache design.
+No GPL/AGPL/LGPL code was copied — those projects contributed ideas only,
+rewritten from scratch for Sherry's model; the MIT project below was used
+for mechanisms, with attribution.
+
+### YesPlayMusic (MIT)
+
+YesPlayMusic by qier222 (https://github.com/qier222/YesPlayMusic),
+Copyright (c) 2020-2023 qier222, licensed under the MIT License:
+
+> MIT License
+>
+> Copyright (c) 2020-2023 qier222
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+> SOFTWARE.
+
+Mechanisms noted: binary-search lyric parse (`src/utils/lyrics.js`,
+`binarySearch` — locate the current line by time instead of scanning the
+whole list) and stale-while-revalidate lyric caching (serve the cached
+lyric at once, refresh in the background). Sherry's cache-first lookup and
+its time-indexed line search follow the same shapes; the implementations
+are Sherry's own.
+
+### Kumone (LGPL-3.0-only)
+
+Kumone by missuo (https://github.com/missuo/kumone), licensed under the
+GNU Lesser General Public License v3.0 only. Mechanisms noted (ideas only,
+no code copied): the text-rebuilt-from-words invariant (the rendered line
+text is always rebuilt from the parsed words,
+`Sources/Kumone/Core/Models/LyricsParser.swift`), `spreadWords` synthesis
+(plain lines spread across their time window into per-word timings), and
+audio-clock-anchored karaoke (word highlighting driven by the audio clock,
+not wall-clock extrapolation). Sherry 2.2.3 applies the same invariants in
+`Beans/Models.swift` (`LyricParser`): `line.text` is built only from parsed
+words, and the 2.2.1 audio-clock anchoring is kept.
+
+### RiPlay (GPL-3.0)
+
+RiPlay by fast4x (https://github.com/fast4x/RiPlay), licensed under the
+GNU General Public License v3.0. Ideas only, no code copied: the
+`plainText` invariant (a tag-free plain-text copy is always kept next to
+the timed text, `androidApp/src/main/kotlin/it/fast4x/riplay/extensions/lyricshelper/parsers/LyricsParser.kt`),
+duration-from-next-word (a word with no explicit end runs until the next
+word starts), Kugou hash-first lookup with a tolerance ramp, and header
+normalisation. Sherry 2.2.3 mirrors the plainText invariant in its cache
+shape (`rawLRC` is the stripped plain text, `rawKRC` the tagged original).
+
+### Spotube (AGPL-3.0)
+
+Spotube (https://github.com/KRTirtho/spotube), licensed under the GNU
+Affero General Public License v3.0. Ideas only, no code copied: tolerant
+LRCLIB parsing (accept the many shapes LRCLIB returns instead of failing
+the whole document), distinctUntilChanged line updates (only re-render the
+lyric line when the active line actually changes), and an explicit quality
+table (quality tiers listed as data, not buried in conditionals). Sherry's
+LRCLIB fallback and its 4-tier quality menu follow the same shapes.
