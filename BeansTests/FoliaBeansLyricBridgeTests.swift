@@ -1,5 +1,5 @@
 import XCTest
-@testable import Beans
+@testable import Sherry
 
 // Timing and identity must survive reparsing, duplicate words, and source changes.
 final class FoliaBeansLyricBridgeTests: XCTestCase {

@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import Beans
+@testable import Sherry
 
 final class LyricParserTests: XCTestCase {
     func testDecodedKRCParsesRelativeWordOffsets() {

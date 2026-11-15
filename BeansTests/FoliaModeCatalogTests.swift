@@ -1,5 +1,5 @@
 import XCTest
-@testable import Beans
+@testable import Sherry
 
 // A renderer must never claim equivalence merely by registering another mode's name.
 final class FoliaModeCatalogTests: XCTestCase {

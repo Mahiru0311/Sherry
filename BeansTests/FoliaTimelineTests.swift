@@ -1,5 +1,5 @@
 import XCTest
-@testable import Beans
+@testable import Sherry
 
 // Behavioral cases from Folia's shared runtime, including gaps and backwards seeks.
 final class FoliaTimelineTests: XCTestCase {

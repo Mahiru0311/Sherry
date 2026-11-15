@@ -1,5 +1,5 @@
 import XCTest
-@testable import Beans
+@testable import Sherry
 
 final class FoliaClassicMotionTests: XCTestCase {
     func testWordLookaheadEndpointsAndBackwardSeek() {

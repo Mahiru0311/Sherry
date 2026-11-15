@@ -1,5 +1,5 @@
 import XCTest
-@testable import Beans
+@testable import Sherry
 
 final class FoliaClassicGlowTests: XCTestCase {
     func testExtendedGraphemesAndTimingBoundaries() {
