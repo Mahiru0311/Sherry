@@ -200,6 +200,33 @@ final class PlayerManager: NSObject, ObservableObject {
     private var abrDropSongKey: String?
     private var abrDropCount = 0
     private var abrLastDropUptime: Double = 0
+    /// ABR 恢复：降档前用户的偏好档位（UserDefaults 持久化，重启后也不丢）；
+    /// 最后一次降到的档位（用户手动改过音质就不再自动恢复）；
+    /// 最近一次卡顿的时刻（5 分钟无卡顿即恢复）；连续无卡顿的歌数；
+    /// 上一次 loadCurrent 载入的歌（区分切歌与同首歌重载）。
+    private var abrLoweredFromRaw: String? {
+        get { defaults.string(forKey: "co.audioQuality.abrLoweredFrom") }
+        set {
+            if let newValue { defaults.set(newValue, forKey: "co.audioQuality.abrLoweredFrom") }
+            else { defaults.removeObject(forKey: "co.audioQuality.abrLoweredFrom") }
+        }
+    }
+    private var abrLastDroppedRaw: String? {
+        get { defaults.string(forKey: "co.audioQuality.abrLastDropped") }
+        set {
+            if let newValue { defaults.set(newValue, forKey: "co.audioQuality.abrLastDropped") }
+            else { defaults.removeObject(forKey: "co.audioQuality.abrLastDropped") }
+        }
+    }
+    private var abrLastStallDate: Date? {
+        get {
+            let value = defaults.double(forKey: "co.audioQuality.abrLastStall")
+            return value > 0 ? Date(timeIntervalSince1970: value) : nil
+        }
+        set { defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: "co.audioQuality.abrLastStall") }
+    }
+    private var abrStallFreeSongs = 0
+    private var abrLoadedSongKey: String?
     private static let nowPlayingArtworkCache = NSCache<NSURL, UIImage>()
 
     private let historyKey = "co.history"
@@ -770,6 +797,13 @@ final class PlayerManager: NSObject, ObservableObject {
         flushListeningDuration()
         resetListeningProgress()
         pendingSeekTarget = nil
+        // ABR 恢复结算：切到新歌时，用上一首的卡顿情况记一次无卡顿歌数，
+        // 满足条件就把偏好恢复到降档前那一档（新歌按恢复后的档位取地址）。
+        if abrLoadedSongKey != nil, abrLoadedSongKey != song.identityKey {
+            if abrStallEpisodes.isEmpty { abrStallFreeSongs += 1 } else { abrStallFreeSongs = 0 }
+            maybeRestorePreferredQuality()
+        }
+        abrLoadedSongKey = song.identityKey
         abrStallEpisodes = []
         let initialProgress = max(0, min(resumeAt ?? 0, max(song.duration, 0)))
         // 切歌时同时解除旧 item，避免旧音频在新播放器建立期间残留输出。
@@ -965,12 +999,17 @@ final class PlayerManager: NSObject, ObservableObject {
         let current = NetworkAudioQuality.officialPreferred
         let next: CoAudioQuality?
         switch current {
-        case .hires, .master: next = .lossless
+        case .hires: next = .lossless
         case .lossless: next = .exhigh
-        case .exhigh, .higher: next = .standard
+        case .exhigh: next = .standard
         case .standard: next = nil
         }
         guard let next else { return false }
+        // 记下降档前的用户偏好（只记第一次，重复降档不覆盖），供无卡顿后恢复。
+        if abrLoweredFromRaw == nil { abrLoweredFromRaw = current.rawValue }
+        abrLastDroppedRaw = next.rawValue
+        abrLastStallDate = Date()
+        abrStallFreeSongs = 0
         abrDropCount += 1
         abrLastDropUptime = now
         abrStallEpisodes = []
@@ -981,6 +1020,32 @@ final class PlayerManager: NSObject, ObservableObject {
         }
         loadCurrent(resumeAt: progress)
         return true
+    }
+
+    /// ABR 恢复：用户没有手动改过音质（当前偏好仍是最后一次降到的档），
+    /// 且已 5 分钟无卡顿或连续 2 首歌无卡顿 → 把偏好恢复到降档前那一档。
+    /// 只在切歌时结算（新歌按恢复后的档位取地址），不中途重载当前歌曲。
+    private func maybeRestorePreferredQuality() {
+        guard let loweredFrom = abrLoweredFromRaw,
+              let lastDropped = abrLastDroppedRaw,
+              let target = CoAudioQuality(rawValue: loweredFrom) else { return }
+        // 用户手动改过音质：当前偏好已不是降到的那档，恢复记录作废。
+        guard NetworkAudioQuality.officialPreferred.rawValue == lastDropped,
+              target.rawValue != lastDropped else {
+            abrLoweredFromRaw = nil
+            abrLastDroppedRaw = nil
+            return
+        }
+        let stallFreeSeconds = Date().timeIntervalSince(abrLastStallDate ?? .distantPast)
+        guard stallFreeSeconds >= 300 || abrStallFreeSongs >= 2 else { return }
+        UserDefaults.standard.set(target.rawValue, forKey: "co.audioQuality")
+        CoLogger.shared.log("ABR 已恢复：\(Int(stallFreeSeconds))s 无卡顿 / 连续 \(abrStallFreeSongs) 首无卡顿，音质回到 \(target.displayName)", level: .info)
+        Task { @MainActor in
+            ToastCenter.shared.show("网络已恢复，音质回到\(target.displayName)", duration: 3)
+        }
+        abrLoweredFromRaw = nil
+        abrLastDroppedRaw = nil
+        abrStallFreeSongs = 0
     }
 
     private func setupPlayer(
@@ -1089,6 +1154,7 @@ final class PlayerManager: NSObject, ObservableObject {
                         let now = ProcessInfo.processInfo.systemUptime
                         self.abrStallEpisodes = self.abrStallEpisodes.filter { now - $0 <= 60 }
                         self.abrStallEpisodes.append(now)
+                        self.abrLastStallDate = Date()
                         if self.abrStallEpisodes.count >= 3, self.dropQualityTierForRepeatedStalls() {
                             return
                         }
