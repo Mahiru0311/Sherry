@@ -375,7 +375,7 @@ struct PlayerView: View {
     }
 
     private func closePlayerSettings() {
-        withAnimation(.easeOut(duration: 0.24)) {
+        withAnimation(.snappy(duration: 0.28)) {
             showPlayerSettings = false
         }
     }
@@ -1465,6 +1465,22 @@ struct PlayerView: View {
 
             Divider().overlay(Color.white.opacity(0.12))
 
+            // 实际播放音质（RecordPlayerView 同款显示）：只展示，不编档位。
+            if let key = player.actualAudioQualityKey, let name = CoAudioQualityMenu.displayName(forKey: key) {
+                HStack(spacing: 10) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 20)
+                    Text("实际音质：\(name)")
+                        .font(CoFont.appFont(13, .semibold))
+                    Spacer()
+                }
+                .foregroundStyle(palette.text)
+                .padding(.horizontal, 10)
+                .frame(height: 36)
+                .background(Capsule().fill(Color.white.opacity(0.07)))
+            }
+
             moreActionRow("定时关闭", systemName: player.sleepTimerRemaining > 0 ? "moon.zzz.fill" : "moon.zzz") {
                 showMoreActions = false
                 showSleepTimer = true
@@ -1979,7 +1995,7 @@ struct PlayerView: View {
     private func scheduleVinylLyricSelection(_ index: Int) {
         vinylLyricTapTask?.cancel()
         vinylLyricTapTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 220_000_000)
+            try? await Task.sleep(nanoseconds: 120_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                 vinylSelectedLyricIndex = index
@@ -2157,7 +2173,7 @@ struct PlayerView: View {
                         .rotation3DEffect(.degrees(Double(coverDrag.width / 18)), axis: (x: 0, y: 1, z: 0), perspective: 0.55)
                         .offset(x: coverDrag.width * 0.05, y: coverDrag.height * 0.05)
                         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: coverDrag)
-                        .animation(.easeOut(duration: 0.24), value: coverSwitchPulse)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: coverSwitchPulse)
                 }
                 .frame(width: size * 1.10, height: size * 1.10)
                 .gesture(
@@ -3911,15 +3927,17 @@ struct PlayerView: View {
     }
 
     private func flySwipe(direction: CGFloat) {
-        let flyOut: CGFloat = direction * 560
-        let flyIn: CGFloat = -direction * 560
+        // 飞出距离跟随视口宽度（2.2.3：固定 560pt 在小屏上飞不出屏、在大屏上不够远）。
+        let distance = (playerViewportSize.width > 0 ? playerViewportSize.width : 560) * 1.25
+        let flyOut: CGFloat = direction * distance
+        let flyIn: CGFloat = -direction * distance
         // 1) 当前封面继续向滑动方向飞出
-        withAnimation(.easeIn(duration: 0.17)) { swipeOffset = flyOut }
+        withAnimation(.spring(response: 0.17, dampingFraction: 0.85)) { swipeOffset = flyOut }
         // 2) 飞出后立即切歌，并把新封面放到对侧屏幕外，再滑回中央
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) {
             // 动画期间开关被关闭：面板直接复位，避免卡在屏幕外
             guard swipeSwitchSong else {
-                withAnimation(.easeOut(duration: 0.2)) {
+                withAnimation(.spring(response: 0.20, dampingFraction: 0.86)) {
                     swipeOffset = 0
                     coverDrag = .zero
                 }
@@ -3929,7 +3947,7 @@ struct PlayerView: View {
             swipeOffset = flyIn
             // 等下一帧先渲染出新封面在屏幕外的位置，再动画滑回中央（否则动画会从旧位置开始，方向不对）
             DispatchQueue.main.async {
-                withAnimation(.easeOut(duration: 0.26)) { swipeOffset = 0 }
+                withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) { swipeOffset = 0 }
             }
         }
     }
@@ -3987,7 +4005,7 @@ struct PlayerView: View {
             }
             guard let image,
                   let dominant = PaletteExtractor.dominantColor(in: image) else { return }
-            withAnimation(.easeInOut(duration: 0.45)) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) {
                 dominantColor = dominant
             }
         } catch {
@@ -4065,6 +4083,7 @@ private struct VinylScrubber: View {
 struct SeekBar: View {
     @EnvironmentObject private var player: PlayerManager
     @EnvironmentObject private var clock: PlaybackClock
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let accent: Color
     let track: Color
     /// 进度条样式：0 流光 / 1 辉光 / 2 极光 / 3 波浪
@@ -4180,7 +4199,7 @@ struct SeekBar: View {
                                 .shadow(color: .white.opacity(0.7), radius: 2)
                         }
                         .offset(x: max(2, thumbX - 5) * flowPhase)
-                        .animation(.linear(duration: 2.4).repeatForever(autoreverses: true), value: flowPhase)
+                        .animation(reduceMotion ? nil : .linear(duration: 2.4).repeatForever(autoreverses: true), value: flowPhase)
                     }
                 }
 
@@ -4325,7 +4344,7 @@ private struct WaveBar: View {
         .onChange(of: isPlaying) { playing in
             phase = playing ? 1 : 0
         }
-        .animation(isPlaying ? .linear(duration: 3).repeatForever(autoreverses: false) : .default, value: phase)
+        .animation(isPlaying ? .linear(duration: 3).repeatForever(autoreverses: false) : nil, value: phase)
     }
 }
 
@@ -4722,7 +4741,7 @@ struct LyricsSection: View {
     private func scheduleLyricSelection(_ index: Int, proxy: ScrollViewProxy) {
         lyricTapTask?.cancel()
         lyricTapTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 220_000_000)
+            try? await Task.sleep(nanoseconds: 120_000_000)
             guard !Task.isCancelled else { return }
             withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
                 selectedLyricIndex = index

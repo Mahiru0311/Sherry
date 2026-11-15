@@ -84,7 +84,7 @@ struct FoliaStageView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .animation(.easeOut(duration: 0.3), value: showControls)
+            .animation(.snappy(duration: 0.28), value: showControls)
         }
     }
 
@@ -142,7 +142,7 @@ struct FoliaStageView: View {
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 12)
-            .animation(.easeOut(duration: 0.3), value: showControls)
+            .animation(.snappy(duration: 0.28), value: showControls)
         }
         .onAppear { hideControlsTask?.cancel() }
     }

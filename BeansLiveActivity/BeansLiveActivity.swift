@@ -55,7 +55,7 @@ struct CoLiveActivity: Widget {
                         .foregroundStyle(.white.opacity(0.8))
                 }
             } compactLeading: {
-                Image(systemName: "music.note")
+                Image(systemName: context.state.isPlaying ? "waveform" : "pause")
                     .foregroundStyle(.white)
             } compactTrailing: {
                 Image(systemName: context.state.isPlaying ? "waveform" : "pause")

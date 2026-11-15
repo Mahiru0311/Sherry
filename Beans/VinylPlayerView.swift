@@ -72,7 +72,7 @@ struct VinylTurntableView: View {
                 let swipeThreshold: CGFloat = 45
 
                 if translation < -swipeThreshold || velocity < -100 {
-                    withAnimation(.easeOut(duration: 0.20)) {
+                    withAnimation(.spring(response: 0.20, dampingFraction: 0.85)) {
                         dragOffset = -discSize * 1.25
                     }
                     onNextTrack?()
@@ -84,7 +84,7 @@ struct VinylTurntableView: View {
                         }
                     }
                 } else if translation > swipeThreshold || velocity > 100 {
-                    withAnimation(.easeOut(duration: 0.20)) {
+                    withAnimation(.spring(response: 0.20, dampingFraction: 0.85)) {
                         dragOffset = discSize * 1.25
                     }
                     onPreviousTrack?()

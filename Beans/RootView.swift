@@ -171,6 +171,8 @@ struct RootView: View {
     /// 底栏是否显示文字（关闭后只显示图标）
     @AppStorage("co.tabLabelsVisible") private var tabLabelsVisible = true
     @AppStorage("co.tabIconStyle") private var tabIconStyleRaw = CoTabIconStyle.sfSymbols.rawValue
+    /// Tab 图标边长（25pt 基准，跟随系统动态字体缩放）。
+    @ScaledMetric(relativeTo: .body) private var tabIconSize: CGFloat = 25
     @State private var tabVisibility = CoTabVisibility.load()
     @AppStorage("co.queueOverlayPresented") private var queueOverlayPresented = false
     @AppStorage("co.disableLiquidGlass") private var disableLiquidGlass = false
@@ -271,7 +273,7 @@ struct RootView: View {
             }
             .animation(
                 rootLayoutSettled
-                    ? .spring(response: 0.42, dampingFraction: 0.86, blendDuration: 0.08)
+                    ? .spring(response: 0.35, dampingFraction: 0.86, blendDuration: 0.08)
                     : nil,
                 value: isPadLandscape
             )
@@ -453,10 +455,10 @@ struct RootView: View {
                     .resizable()
                     .renderingMode(.template)
                     .scaledToFit()
-                    .frame(width: 25, height: 25)
+                    .frame(width: tabIconSize, height: tabIconSize)
             } else {
                 Image(systemName: tab.icon(for: tabIconStyle))
-                    .font(.system(size: 25, weight: .semibold))
+                    .font(.system(size: tabIconSize, weight: .semibold))
             }
         }
     }
@@ -772,11 +774,11 @@ struct RootView: View {
                         .resizable()
                         .renderingMode(.template)
                         .scaledToFit()
-                        .frame(width: 25, height: 25)
+                        .frame(width: tabIconSize, height: tabIconSize)
                 } else {
                     Image(systemName: tab.icon(for: tabIconStyle))
-                        .font(.system(size: 25, weight: .semibold))
-                        .frame(width: 25, height: 25)
+                        .font(.system(size: tabIconSize, weight: .semibold))
+                        .frame(width: tabIconSize, height: tabIconSize)
                 }
 
                 if tabLabelsVisible {
@@ -1158,10 +1160,10 @@ private struct RootMiniPlayerAccessory: View {
 }
 
 
-// MARK: - 系统 TabBar 清透风格（实例级配置）
-// 系统 TabView 创建之后，`UITabBar.appearance()` 全局代理对已存在的实例不再生效，
-// 所以每个 tab 页面内放一个 TabBarAppearanceConfigurator，通过 tabBarController
-// 拿到当前 UITabBar 实例，直接设置固定清透外观（全透明、无阴影）。
+// MARK: - TabBar 长按手势（实例级配置）
+// 2.2.3：清透外观已由 SwiftUI 侧统一负责（.toolbarBackground(.hidden, for: .tabBar)
+// + .background(Color.clear) + .tint），UIKit 配置器不再重复设置 appearance，
+// 只保留首页图标长按手势的安装。
 
 struct TabBarAppearanceConfigurator: UIViewControllerRepresentable {
     func makeCoordinator() -> Coordinator {
@@ -1191,25 +1193,14 @@ struct TabBarAppearanceConfigurator: UIViewControllerRepresentable {
         }
     }
 
-    /// 固定清透风格：全透明背景、无阴影；选中态用主题色，
-    /// 材质与模糊完全交给系统对底层页面内容的渲染，不再支持手动调节透明度
+    /// 只安装首页图标长按手势；外观（透明背景 / 选中色）由 SwiftUI 侧负责，
+    /// 这里不再重复设置 UITabBarAppearance，避免两边打架。
     private static func apply(
         from controller: UIViewController,
         coordinator: Coordinator
     ) {
         guard let tabBar = controller.tabBarController?.tabBar else { return }
         installHomeLongPress(on: tabBar, coordinator: coordinator)
-        tabBar.isHidden = false
-        let appearance = UITabBarAppearance()
-        appearance.configureWithTransparentBackground()
-        // 超薄材质模糊：与迷你播放器一致的清透玻璃透明度
-        appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
-        appearance.backgroundColor = .clear
-        appearance.shadowColor = .clear
-        tabBar.standardAppearance = appearance
-        tabBar.scrollEdgeAppearance = appearance
-        tabBar.tintColor = UIColor.coAmber
-        tabBar.isTranslucent = true
     }
 
     private static func installHomeLongPress(on tabBar: UITabBar, coordinator: Coordinator) {

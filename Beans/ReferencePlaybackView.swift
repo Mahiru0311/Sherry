@@ -233,7 +233,7 @@ struct ReferencePlaybackView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
             .frame(width: size.width, height: size.height)
-            .animation(.easeOut(duration: 0.3), value: showLandscapeControls)
+            .animation(.snappy(duration: 0.28), value: showLandscapeControls)
         }
     }
 

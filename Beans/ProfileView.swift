@@ -319,13 +319,17 @@ struct ProfileView: View {
         return UIScreen.main.traitCollection.userInterfaceStyle == .dark ? .dark : .light
     }
 
-    /// 顶部安全区真实值（灵动岛机型约 59pt）：固定黑条的高度，取关键窗口真实值，兜底 59。
+    /// 顶部安全区真实值（灵动岛机型约 59pt）：固定黑条的高度，取关键窗口真实值；
+    /// 取不到时退到任一窗口，再退到按机型估算的值（不再全局写死 59）。
     private var profileTopSafeArea: CGFloat {
-        let top = UIApplication.shared.connectedScenes
+        let windows = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows)
-            .first(where: { $0.isKeyWindow })?.safeAreaInsets.top ?? 59
-        return top > 0 ? top : 59
+        let top = windows.first(where: { $0.isKeyWindow })?.safeAreaInsets.top
+            ?? windows.first?.safeAreaInsets.top ?? 0
+        if top > 0 { return top }
+        if UIDevice.current.userInterfaceIdiom == .pad { return 24 }
+        return 47
     }
 
     /// 状态栏方案：我的页顶部恒有一条黑色固定条，浅色主题下也用深色方案，
@@ -4473,6 +4477,9 @@ struct CoLyricOffsetSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(.clear)
+        .presentationCornerRadius(28)
         .onAppear { syncPerSongOffset() }
         .onChange(of: player.currentSong?.identityKey) { _ in syncPerSongOffset() }
     }

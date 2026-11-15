@@ -39,7 +39,7 @@ struct OnboardingView: View {
                     disclaimerPage.tag(3)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.easeInOut(duration: 0.3), value: page)
+                .animation(.snappy(duration: 0.28), value: page)
 
                 // 底部控制区
                 bottomBar
@@ -78,7 +78,7 @@ struct OnboardingView: View {
             if page < totalPages - 1 {
                 // 下一步 / 跳过介绍
                 Button {
-                    withAnimation(.easeInOut(duration: 0.3)) { page += 1 }
+                    withAnimation(.snappy(duration: 0.28)) { page += 1 }
                 } label: {
                     Text(nextText)
                         .font(CoFont.appFont(16, .bold))
@@ -93,7 +93,7 @@ struct OnboardingView: View {
                 }
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.3)) { page = totalPages - 1 }
+                    withAnimation(.snappy(duration: 0.28)) { page = totalPages - 1 }
                 } label: {
                     Text(skipText)
                         .font(CoFont.appFont(13))

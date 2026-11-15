@@ -137,7 +137,7 @@ struct SongCell: View {
         }
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 8)
-        .animation(.easeOut(duration: 0.28), value: appeared)
+        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: appeared)
         .onAppear { appeared = true }
     }
 }

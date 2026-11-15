@@ -27,32 +27,31 @@ struct FoliaClassicWordView: View {
         case .passed: return geometry.rotation + geometry.passedRotation
         }
     }
+    /// 2.2.3：五处叠加的 .animation 合并为这一处：等待/已过统一用
+    /// spring(0.30/0.85)，进行中保持逐词插值弹簧（逐字扫掠的驱动）。
     private var animation: Animation? {
         guard !reduceMotion else { return nil }
         switch state {
-        case .waiting: return .easeOut(duration: 0.4)
+        case .waiting: return .spring(response: 0.30, dampingFraction: 0.85)
         case .active: return .interpolatingSpring(mass: 1, stiffness: 260, damping: 16, initialVelocity: 0)
-        case .passed: return .easeInOut(duration: 0.5)
+        case .passed: return .spring(response: 0.30, dampingFraction: 0.85)
         }
     }
 
     var body: some View {
         Text(word.text).font(.system(size: fontSize, weight: .bold)).fixedSize()
             .foregroundStyle(state == .active ? accent : base)
-            .animation(reduceMotion ? nil : state == .active ? .linear(duration: max(0.1, word.endTime - word.startTime)) : .easeInOut(duration: 0.8), value: state)
             .background {
                 if !reduceMotion { FoliaClassicGlowView(word: word, time: time, fontSize: fontSize, color: accent) }
             }
-            .blur(radius: state == .waiting && !reduceMotion ? 14 : 0)
-            .animation(reduceMotion ? nil : .easeOut(duration: state == .active ? 0.2 : 0.5), value: state)
+            .blur(radius: state == .waiting && !reduceMotion ? 8 : 0)
             .opacity(opacity)
-            .animation(reduceMotion ? nil : .easeOut(duration: state == .active ? 0.1 : 0.5), value: state)
             .scaleEffect(scale)
-            .offset(x: reduceMotion ? 0 : geometry.x + (state == .waiting ? sin(geometry.y) * 140 : 0),
-                    y: reduceMotion ? 0 : geometry.y + (state == .waiting ? cos(geometry.x) * 70 : 0))
-            .animation(animation, value: state)
+            .offset(x: reduceMotion ? 0 : geometry.x + (state == .waiting ? sin(geometry.y) * 40 : 0),
+                    y: reduceMotion ? 0 : geometry.y + (state == .waiting ? cos(geometry.x) * 24 : 0))
             .rotationEffect(.degrees(rotation))
-            .animation(reduceMotion ? nil : state == .passed ? .linear(duration: 5) : animation, value: state)
+            // 2.2.3：上面五处叠加的 .animation 合并为这一处；5s 线性旋转淡出已删。
+            .animation(animation, value: state)
             .accessibilityHidden(state == .waiting)
     }
 }

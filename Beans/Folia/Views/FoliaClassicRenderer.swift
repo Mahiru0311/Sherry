@@ -50,7 +50,7 @@ struct FoliaClassicRenderer: View {
                                 .transition(reduceMotion ? .opacity : .asymmetric(
                                     insertion: .modifier(active: FoliaClassicLineTransition(scale: 0.8, blur: 16, opacity: 0),
                                                          identity: FoliaClassicLineTransition(scale: 1, blur: 0, opacity: 1)),
-                                    removal: .modifier(active: FoliaClassicLineTransition(scale: 1.2, blur: 28, opacity: 0),
+                                    removal: .modifier(active: FoliaClassicLineTransition(scale: 1.0, blur: 16, opacity: 0),
                                                        identity: FoliaClassicLineTransition(scale: 1, blur: 0, opacity: 1))))
                         } else if showText {
                             Text("等待音乐")

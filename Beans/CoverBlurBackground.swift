@@ -83,7 +83,13 @@ final class CoverBlurView: UIView {
     /// 背景动态效果：模糊封面缓慢呼吸缩放（UIView 循环动画，可靠运行）+ 主色渐变端点缓慢摆动。
     /// 长周期低频 + GPU 合成，不触发 SwiftUI 布局，也几乎不增加耗电。
     private func startBackgroundAnimations() {
-        guard animationsEnabled else { return }
+        guard animationsEnabled, !UIAccessibility.isReduceMotionEnabled else {
+            // 减弱动态效果开启时不启动呼吸/摆动动画，并清掉已有的。
+            imageView.layer.removeAnimation(forKey: "coBgBreathe")
+            gradientLayer.removeAnimation(forKey: "coGradStart")
+            gradientLayer.removeAnimation(forKey: "coGradEnd")
+            return
+        }
         // 重新触发时先取消旧动画，避免堆叠
         imageView.layer.removeAnimation(forKey: "coBgBreathe")
         gradientLayer.removeAnimation(forKey: "coGradStart")
@@ -277,7 +283,7 @@ final class CoverBlurView: UIView {
         }
         UIView.transition(
             with: imageView,
-            duration: 0.4,
+            duration: 0.3,
             options: [.transitionCrossDissolve, .beginFromCurrentState]
         ) {
             self.imageView.image = image

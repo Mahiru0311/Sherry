@@ -48,6 +48,8 @@ struct SectionOrderSheet: View {
             listView
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+                .presentationBackground(.clear)
+                .presentationCornerRadius(28)
         }
         .onAppear {
             var merged = order
@@ -74,7 +76,7 @@ struct SectionOrderSheet: View {
                         .listRowBackground(Color.clear)
                     }
                     .onMove { from, to in
-                        withAnimation(.default) {
+                        withAnimation(.snappy(duration: 0.25)) {
                             order.move(fromOffsets: from, toOffset: to)
                         }
                     }
@@ -111,7 +113,7 @@ struct SectionOrderSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("恢复默认") {
-                        withAnimation(.default) {
+                        withAnimation(.snappy(duration: 0.25)) {
                             order = sections
                             if let platformOrder {
                                 PlatformPreferenceStore.shared.resetOrder()

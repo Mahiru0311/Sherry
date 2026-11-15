@@ -667,9 +667,13 @@ struct CoSheetModifier: ViewModifier {
             content
                 .presentationDetents(Self.makeDetents(detents))
                 .presentationDragIndicator(dragIndicator ? .visible : .hidden)
+                .presentationBackground(.clear)
+                .presentationCornerRadius(28)
         } else {
             content
                 .presentationDetents(Self.makeDetents(detents))
+                .presentationBackground(.clear)
+                .presentationCornerRadius(28)
         }
     }
 }
@@ -1682,6 +1686,7 @@ struct QRCodeView: View {
 
 struct NowPlayingIndicator: View {
     @EnvironmentObject private var theme: ThemeStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animating = false
 
     private let barScales: [CGFloat] = [0.62, 1.0, 0.78]
@@ -1701,7 +1706,7 @@ struct NowPlayingIndicator: View {
                         anchor: .bottom
                     )
                     .animation(
-                        .easeInOut(duration: 0.35)
+                        reduceMotion ? nil : .easeInOut(duration: 0.30 + Double(index) * 0.08)
                             .repeatForever(autoreverses: true)
                             .delay(Double(index) * 0.12),
                         value: animating
@@ -1709,7 +1714,7 @@ struct NowPlayingIndicator: View {
             }
         }
         .frame(height: 16)
-        .onAppear { animating = true }
+        .onAppear { if !reduceMotion { animating = true } }
         .onDisappear { animating = false }
     }
 }
@@ -1726,7 +1731,7 @@ struct SectionEntrance: ViewModifier {
             .opacity(appeared ? 1 : 0)
             .offset(y: appeared ? 0 : 14)
             .onAppear {
-                withAnimation(.easeOut(duration: 0.5).delay(delay)) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85).delay(min(delay, 0.15))) {
                     appeared = true
                 }
             }
