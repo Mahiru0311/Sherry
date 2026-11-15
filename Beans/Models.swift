@@ -589,6 +589,7 @@ enum LyricParser {
     }
 
     private static func parseKRCWordLines(_ raw: String) -> [LyricLine] {
+        let scale: Double = 0.001
         var result: [LyricLine] = []
         let linePattern = #"\[(\d+),(\d+)\]"#
         guard let lineRegex = try? NSRegularExpression(pattern: linePattern) else { return [] }
