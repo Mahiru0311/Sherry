@@ -15,7 +15,9 @@ final class SherryLyricsCache {
     static let shared = SherryLyricsCache()
 
     /// 磁盘文档格式版本：解析/存储形状一变就 +1，旧文件自然失效。
-    static let formatVersion = 3
+    /// 2.2.3：3 → 4：2.2.2 的酷我缓存条目 rawLRC 带逐字标签
+    /// （<3780,-3780>…），升版后全部失效，不再命中。
+    static let formatVersion = 4
     /// 选择算法版本：匹配规则一变就 +1，旧的"赢家"不能再绕过新匹配器。
     /// 2.2.2：1 → 2：2.2.0 的 24h 负缓存条目没有 transientNegative 字段，
     /// 在 2.2.1 里按 24h 解码（缓存投毒跨版本残留），升版后全部失效。

@@ -50,7 +50,7 @@ actor SherryLyricsService {
                 CoLogger.shared.log("歌词缓存命中（负缓存）：\(song.name)", level: .debug)
                 return []
             }
-            let lines = parseCached(lrc: hit.lrc, krc: hit.krc)
+            let lines = parseCached(lrc: hit.lrc, krc: hit.krc, source: hit.source)
             if !lines.isEmpty {
                 CoLogger.shared.log("歌词缓存命中：\(song.name) 来源=\(hit.source) 行数=\(lines.count)", level: .debug)
                 return finalize(lines: lines, timing: SherryLyricDocument.Timing(rawValue: hit.timing) ?? .synced)
@@ -77,7 +77,14 @@ actor SherryLyricsService {
         return LyricParser.withSynthesizedWords(lines)
     }
 
-    private static func parseCached(lrc: String, krc: String?) -> [LyricLine] {
+    /// 缓存重载按来源分发（2.2.3）：酷我条目的 lrc 是去标签的行级文本、
+    /// krc 是带 <起,长> 标签的逐字原文，走 .kuwo 分支合并逐字时间；
+    /// 酷狗 KRC 条目走 .kugouKRC；其余（酷狗备用端点 / LRCLIB）走纯 LRC，
+    /// parseCore 的去标签防线兜底。2.2.2 的毒缓存靠 formatVersion 4 失效。
+    static func parseCached(lrc: String, krc: String?, source: String) -> [LyricLine] {
+        if source == SherryLyricDocument.Source.kuwo.rawValue, let krc, !krc.isEmpty {
+            return LyricParser.parse(lrc, wordRaw: krc, wordFormat: .kuwo)
+        }
         if let krc, !krc.isEmpty {
             return LyricParser.parse(lrc, wordRaw: krc, wordFormat: .kugouKRC)
         }

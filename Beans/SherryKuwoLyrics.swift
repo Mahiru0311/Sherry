@@ -126,8 +126,10 @@ enum SherryKuwoLyrics {
                 ?? SherryLyricsMatcher.splitArtists(chosen.artist ?? artist),
             album: tags["al"],
             durationMs: chosen.durationSeconds.map { Int(($0 * 1000).rounded()) } ?? durationMs,
-            rawLRC: raw,
-            rawKRC: nil
+            // 2.2.3：rawLRC 存去标签的行级文本，rawKRC 存带 <起,长> 标签的
+            // 逐字原文；缓存重载按来源分发，标签再也不会走纯 LRC 路径进渲染。
+            rawLRC: plain,
+            rawKRC: raw
         )
     }
 

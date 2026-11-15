@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import Beans
 
@@ -25,6 +26,55 @@ final class LyricParserTests: XCTestCase {
 
         XCTAssertEqual(lines.count, 2)
         XCTAssertNil(lines.first?.words)
+    }
+
+    func testWordTimingTagsNeverReachRenderedText() {
+        // 2.2.2 真机复现：酷我 lrcx 行 "[01:19.050]<3780,-3780>慌<5610,-1410>啥…"
+        // 经缓存重载走纯 LRC 路径时，标签原样进了渲染。
+        let tagged = "[01:19.050]<3780,-3780>慌<5610,-1410>啥<4860,3240>子<12060,-3060>嘛"
+        let lines = LyricParser.parse(tagged)
+
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertEqual(lines.first?.text, "慌啥子嘛")
+        XCTAssertFalse(lines.first?.text.contains("<") ?? true)
+        XCTAssertFalse(lines.first?.text.contains(">") ?? true)
+    }
+
+    func testKRCWordMarkersAcceptNegativeTimings() {
+        // 负时长是合法编码（和/差变换的中间值），解析时钳制，不丢整行。
+        let krc = "[79050,5000]<3780,-3780,0>慌<5610,-1410,0>啥"
+        let line = LyricParser.parse("", wordRaw: krc, wordFormat: .kugouKRC).first
+
+        XCTAssertEqual(line?.text, "慌啥")
+        XCTAssertNotNil(line?.words)
+        XCTAssertTrue(line?.words?.allSatisfy { $0.start >= 0 && $0.duration >= 0.001 } ?? false)
+    }
+
+    func testKuwoCacheRoundTripKeepsWordsAndCleanText() {
+        // 2.2.3 缓存形状：lrc 去标签、krc 存带标签原文；重载走 kuwo 分支。
+        let raw = "[kuwo:073]\n[01:19.050]<3780,-3780>慌<5610,-1410>啥"
+        let plain = raw.replacingOccurrences(
+            of: #"<-?\d+,-?\d+(?:,-?\d+)?>"#, with: "", options: .regularExpression
+        )
+        let cache = SherryLyricsCache(directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true))
+        let document = SherryLyricDocument(
+            source: .kuwo, timing: .wordSynced,
+            lines: LyricParser.parse(plain, wordRaw: raw, wordFormat: .kuwo),
+            title: "慌啥子嘛", artists: ["赵本山"], album: nil, durationMs: 260_000,
+            rawLRC: plain, rawKRC: raw
+        )
+        let key = SherryLyricsCache.key(trackSignature: "test-kuwo-roundtrip")
+        cache.store(document: document, key: key)
+        guard let hit = cache.lookup(key: key) else {
+            return XCTFail("缓存未命中")
+        }
+        let lines = SherryLyricsService.parseCached(lrc: hit.lrc, krc: hit.krc, source: hit.source)
+
+        XCTAssertEqual(lines.first?.text, "慌啥")
+        XCTAssertFalse(lines.first?.text.contains("<") ?? true)
+        XCTAssertFalse(lines.first?.text.contains(">") ?? true)
+        XCTAssertTrue(lines.first?.hasWordTimings ?? false)
     }
 
     func testKaraokeOpacityInterpolates() {

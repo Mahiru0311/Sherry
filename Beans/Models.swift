@@ -1,24 +1,22 @@
 import Foundation
 
-/// 音质等级。
+/// 音质等级（2.2.3：删除 higher/master 幽灵档：菜单只提供 4 档，
+/// normalized() 本来就把它们折叠掉；历史存量 "higher"/"master"
+/// 经 rawValue 初始化失败后由各调用方回退到 .hires）。
 enum CoAudioQuality: String, CaseIterable, Identifiable {
     case standard
-    case higher
     case exhigh
     case lossless
     case hires
-    case master
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
         case .standard: return coLocalized("标准", "Standard")
-        case .higher: return coLocalized("更高", "Higher")
         case .exhigh: return coLocalized("极高", "Very High")
         case .lossless: return coLocalized("无损", "Lossless")
         case .hires: return "Hi-Res"
-        case .master: return "Master"
         }
     }
 
@@ -67,17 +65,11 @@ struct Song: Identifiable, Hashable, Codable {
     let duration: TimeInterval
     /// 歌曲来源（网易云 / QQ音乐）
     let source: SongSource
-    /// QQ 音乐 songmid（source == .qq 时用于获取播放地址与歌词）
-    let qqMid: String?
-    /// QQ 音乐音频文件 media_mid；部分歌曲与 songmid 不同，取 vkey 时必须优先使用
-    let qqMediaMid: String?
     /// 酷狗音乐文件 hash 与专辑音频 id（source == .kugou 时用于获取播放地址与歌词）
     let kugouHash: String?
     let kugouAlbumAudioId: String?
     let kugouAlbumId: String?
     let kugouQualityHashes: [String: String]?
-    /// 咪咕歌词接口使用的版权资源标识，和展示歌曲 ID 在部分曲目中并不相同。
-    let miguCopyrightId: String?
     /// 咪咕搜索结果直接提供的歌词地址，优先于再次查询资源详情。
     let miguLyricURL: URL?
     /// 汽水音乐原始字符串曲目 ID（汽水 ID 可能超过 Int 的安全范围）。
@@ -98,8 +90,7 @@ struct Song: Identifiable, Hashable, Codable {
         case .netease:
             return URL(string: "https://music.163.com/#/song?id=\(id)")
         case .qq:
-            let identifier = qqMid?.isEmpty == false ? qqMid! : String(id)
-            return URL(string: "https://y.qq.com/n/ryqq/songDetail/\(identifier)")
+            return URL(string: "https://y.qq.com/n/ryqq/songDetail/\(id)")
         case .kugou:
             guard let hash = kugouHash?.trimmingCharacters(in: .whitespacesAndNewlines), !hash.isEmpty else {
                 return nil
@@ -149,7 +140,7 @@ struct Song: Identifiable, Hashable, Codable {
         }
     }
 
-    init(id: Int, name: String, artists: String, album: String, coverURL: URL?, duration: TimeInterval, source: SongSource = .kugou, qqMid: String? = nil, qqMediaMid: String? = nil, kugouHash: String? = nil, kugouAlbumAudioId: String? = nil, kugouAlbumId: String? = nil, kugouQualityHashes: [String: String]? = nil, miguCopyrightId: String? = nil, miguLyricURL: URL? = nil, qishuiID: String? = nil, bilibiliID: String? = nil, fee: Int = 0) {
+    init(id: Int, name: String, artists: String, album: String, coverURL: URL?, duration: TimeInterval, source: SongSource = .kugou, kugouHash: String? = nil, kugouAlbumAudioId: String? = nil, kugouAlbumId: String? = nil, kugouQualityHashes: [String: String]? = nil, miguLyricURL: URL? = nil, qishuiID: String? = nil, bilibiliID: String? = nil, fee: Int = 0) {
         self.id = id
         self.name = name
         self.artists = artists
@@ -157,20 +148,17 @@ struct Song: Identifiable, Hashable, Codable {
         self.coverURL = coverURL
         self.duration = duration
         self.source = source
-        self.qqMid = qqMid
-        self.qqMediaMid = qqMediaMid
         self.kugouHash = kugouHash
         self.kugouAlbumAudioId = kugouAlbumAudioId
         self.kugouAlbumId = kugouAlbumId
         self.kugouQualityHashes = kugouQualityHashes
-        self.miguCopyrightId = miguCopyrightId
         self.miguLyricURL = miguLyricURL
         self.qishuiID = qishuiID
         self.bilibiliID = bilibiliID
         self.fee = fee
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, artists, album, coverURL, duration, source, qqMid, qqMediaMid, kugouHash, kugouAlbumAudioId, kugouAlbumId, kugouQualityHashes, miguCopyrightId, miguLyricURL, qishuiID, bilibiliID, fee }
+    private enum CodingKeys: String, CodingKey { case id, name, artists, album, coverURL, duration, source, kugouHash, kugouAlbumAudioId, kugouAlbumId, kugouQualityHashes, miguLyricURL, qishuiID, bilibiliID, fee }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -181,13 +169,10 @@ struct Song: Identifiable, Hashable, Codable {
         coverURL = try c.decodeIfPresent(URL.self, forKey: .coverURL)
         duration = try c.decodeIfPresent(TimeInterval.self, forKey: .duration) ?? 0
         source = try c.decodeIfPresent(SongSource.self, forKey: .source) ?? .kugou
-        qqMid = try c.decodeIfPresent(String.self, forKey: .qqMid)
-        qqMediaMid = try c.decodeIfPresent(String.self, forKey: .qqMediaMid)
         kugouHash = try c.decodeIfPresent(String.self, forKey: .kugouHash)
         kugouAlbumAudioId = try c.decodeIfPresent(String.self, forKey: .kugouAlbumAudioId)
         kugouAlbumId = try c.decodeIfPresent(String.self, forKey: .kugouAlbumId)
         kugouQualityHashes = try c.decodeIfPresent([String: String].self, forKey: .kugouQualityHashes)
-        miguCopyrightId = try c.decodeIfPresent(String.self, forKey: .miguCopyrightId)
         miguLyricURL = try c.decodeIfPresent(URL.self, forKey: .miguLyricURL)
         qishuiID = try c.decodeIfPresent(String.self, forKey: .qishuiID)
         bilibiliID = try c.decodeIfPresent(String.self, forKey: .bilibiliID)
@@ -203,13 +188,10 @@ struct Song: Identifiable, Hashable, Codable {
         try c.encodeIfPresent(coverURL, forKey: .coverURL)
         try c.encode(duration, forKey: .duration)
         try c.encode(source, forKey: .source)
-        try c.encodeIfPresent(qqMid, forKey: .qqMid)
-        try c.encodeIfPresent(qqMediaMid, forKey: .qqMediaMid)
         try c.encodeIfPresent(kugouHash, forKey: .kugouHash)
         try c.encodeIfPresent(kugouAlbumAudioId, forKey: .kugouAlbumAudioId)
         try c.encodeIfPresent(kugouAlbumId, forKey: .kugouAlbumId)
         try c.encodeIfPresent(kugouQualityHashes, forKey: .kugouQualityHashes)
-        try c.encodeIfPresent(miguCopyrightId, forKey: .miguCopyrightId)
         try c.encodeIfPresent(miguLyricURL, forKey: .miguLyricURL)
         try c.encodeIfPresent(qishuiID, forKey: .qishuiID)
         try c.encodeIfPresent(bilibiliID, forKey: .bilibiliID)
@@ -603,7 +585,9 @@ enum LyricParser {
             let contentStart = rawLine.index(rawLine.startIndex, offsetBy: lineMatch.range.upperBound)
             let content = String(rawLine[contentStart...])
             // KRC 词标记 <偏移,时长,?>：词时间是相对行起始的毫秒偏移。
-            let markerPattern = #"<(\d+),(\d+)(?:,\d+)?>"#
+            // 2.2.3：接受可选负号（负时长是合法编码，和/差变换的中间值，
+            // 不是脏数据；非法值在下面钳制/丢弃，不丢整行）。
+            let markerPattern = #"<(-?\d+),(-?\d+)(?:,-?\d+)?>"#
             guard let markerRegex = try? NSRegularExpression(pattern: markerPattern) else { continue }
             let markers = markerRegex.matches(in: content, range: NSRange(content.startIndex..., in: content))
             guard !markers.isEmpty else { continue }
@@ -619,8 +603,13 @@ enum LyricParser {
                     : content.endIndex
                 guard textStart <= textEnd else { continue }
                 let text = String(content[textStart..<textEnd])
-                let absoluteStart = lineStart * scale + wordStart * scale
-                words.append(LyricWord(text: text, start: absoluteStart, duration: max(wordDuration * scale, 0.001)))
+                guard !text.isEmpty else { continue }
+                // 起点/时长钳制到合法范围（负值是编码中间态，落到 0 / 0.001）；
+                // 仍非法的词直接丢弃，不污染整行。
+                let absoluteStart = max(0, lineStart * scale + wordStart * scale)
+                let clampedDuration = max(wordDuration * scale, 0.001)
+                guard absoluteStart.isFinite, clampedDuration.isFinite else { continue }
+                words.append(LyricWord(text: text, start: absoluteStart, duration: clampedDuration))
             }
             let text = words.map(\.text).joined()
             if !text.isEmpty {
@@ -706,7 +695,11 @@ enum LyricParser {
         var lines: [LyricLine] = []
         for line in raw.components(separatedBy: .newlines) {
             parseTimes(in: line).forEach { time in
+                // 2.2.3：逐字标签 <起,长> 绝不能进渲染文本（酷我 lrcx 行经缓存
+                // 重载曾原样进过渲染）：这里是最后一道防线，所有路径的行文本
+                // 都先去掉 <…> 词标记再展示。
                 let text = line.replacingOccurrences(of: #"\[\d{2}:\d{2}(\.\d{1,3})?\]"#, with: "", options: .regularExpression)
+                    .replacingOccurrences(of: #"<-?\d+,-?\d+(?:,-?\d+)?>"#, with: "", options: .regularExpression)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 lines.append(LyricLine(time: max(0, time + offset), text: text))
             }
