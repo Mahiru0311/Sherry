@@ -71,6 +71,20 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build 2>&1 | tee xcodebuild.log
 
+      - name: Test (simulator)
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Sherry.xcodeproj \
+            -scheme Sherry \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            2>&1 | tee xcodebuild-test.log
+
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -78,6 +92,7 @@ jobs:
           name: Sherry-build-diagnostics
           path: |
             xcodebuild.log
+            xcodebuild-test.log
 
       - name: Verify version in built app
         run: |
