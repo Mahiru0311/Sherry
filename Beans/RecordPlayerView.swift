@@ -263,7 +263,7 @@ struct RecordPlayerView: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 16)
-            .animation(.easeOut(duration: 0.3), value: showLandscapeControls)
+            .animation(.snappy(duration: 0.28), value: showLandscapeControls)
         }
     }
 
@@ -640,12 +640,10 @@ struct CoAudioQualityMenu: View {
     @EnvironmentObject private var player: PlayerManager
     @AppStorage("co.audioQuality") private var selectedRaw = CoAudioQuality.hires.rawValue
 
+    /// 2.2.3：higher/master 已随枚举删除；历史存量经 rawValue 初始化
+    /// 失败后由调用方回退 .hires，这里直接返回原值。
     static func normalized(_ quality: CoAudioQuality) -> CoAudioQuality {
-        switch quality {
-        case .higher: return .exhigh
-        case .master: return .hires
-        default: return quality
-        }
+        quality
     }
 
     static func displayName(forKey key: String) -> String? {
@@ -893,14 +891,14 @@ private struct RecordModeTurntableView: View {
         // Finish moving the old track off-screen before replacing its song and
         // cover. This keeps the expensive artwork/lyrics update out of the
         // visible part of the swipe and avoids a mid-gesture hitch.
-        withAnimation(.easeOut(duration: slideOutDuration)) {
+        withAnimation(.spring(response: slideOutDuration, dampingFraction: 0.85)) {
             dragOffset = offset
             isDragging = false
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + slideOutDuration) {
             callback?()
             dragOffset = -offset
-            withAnimation(.easeOut(duration: slideInDuration)) {
+            withAnimation(.spring(response: slideInDuration, dampingFraction: 0.86)) {
                 dragOffset = 0
             }
         }

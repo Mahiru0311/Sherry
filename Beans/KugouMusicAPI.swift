@@ -1410,11 +1410,11 @@ final class KugouMusicAPI {
         switch requestedQuality {
         case .standard:
             quality = "128"
-        case .higher, .exhigh:
+        case .exhigh:
             quality = "320"
         case .lossless:
             quality = "flac"
-        case .hires, .master:
+        case .hires:
             quality = "high"
         }
 
@@ -1468,11 +1468,11 @@ final class KugouMusicAPI {
         switch requestedQuality {
         case .standard:
             quality = "128"
-        case .higher, .exhigh:
+        case .exhigh:
             quality = "320"
         case .lossless:
             quality = "flac"
-        case .hires, .master:
+        case .hires:
             quality = "hires"
         }
         let userId = auth.userId.isEmpty ? "0" : auth.userId
@@ -2312,8 +2312,6 @@ final class KugouMusicAPI {
                 coverURL: coverURL,
                 duration: song.duration,
                 source: song.source,
-                qqMid: song.qqMid,
-                qqMediaMid: song.qqMediaMid,
                 kugouHash: song.kugouHash,
                 kugouAlbumAudioId: song.kugouAlbumAudioId,
                 kugouAlbumId: song.kugouAlbumId,
@@ -2367,19 +2365,24 @@ final class KugouMusicAPI {
         return result
     }
 
-    private static func qualityHashCandidates(primary: String?, qualityHashes: [String: String]?, quality requestedQuality: CoAudioQuality? = nil) -> [String] {
+    /// 档位顺序（两份候选函数共用，2.2.3 合并重复实现）：偏好档在前，其余按
+    /// hires → lossless → exhigh → standard 补齐；higher/master 幽灵档已删。
+    private static func qualityOrder(for requestedQuality: CoAudioQuality?) -> [String] {
         let requested = requestedQuality ?? NetworkAudioQuality.officialPreferred
-        let order: [String]
         switch requested {
-        case .hires, .master:
-            order = ["hires", "lossless", "exhigh", "standard"]
+        case .hires:
+            return ["hires", "lossless", "exhigh", "standard"]
         case .lossless:
-            order = ["lossless", "exhigh", "standard"]
-        case .exhigh, .higher:
-            order = ["exhigh", "standard"]
+            return ["lossless", "exhigh", "standard"]
+        case .exhigh:
+            return ["exhigh", "standard"]
         case .standard:
-            order = ["standard"]
+            return ["standard"]
         }
+    }
+
+    private static func qualityHashCandidates(primary: String?, qualityHashes: [String: String]?, quality requestedQuality: CoAudioQuality? = nil) -> [String] {
+        let order = qualityOrder(for: requestedQuality)
         var seen = Set<String>()
         var result: [String] = []
         func append(_ value: String?) {
@@ -2397,18 +2400,7 @@ final class KugouMusicAPI {
     /// 带档位键的 hash 候选：顺序与 qualityHashCandidates 完全一致，
     /// 只是多保留 key（hires/lossless/exhigh/standard），主 hash 的 key 为 nil。
     private static func qualityHashCandidatesWithKeys(primary: String?, qualityHashes: [String: String]?, quality requestedQuality: CoAudioQuality? = nil) -> [(key: String?, hash: String)] {
-        let requested = requestedQuality ?? NetworkAudioQuality.officialPreferred
-        let order: [String]
-        switch requested {
-        case .hires, .master:
-            order = ["hires", "lossless", "exhigh", "standard"]
-        case .lossless:
-            order = ["lossless", "exhigh", "standard"]
-        case .exhigh, .higher:
-            order = ["exhigh", "standard"]
-        case .standard:
-            order = ["standard"]
-        }
+        let order = qualityOrder(for: requestedQuality)
         var seen = Set<String>()
         var result: [(key: String?, hash: String)] = []
         func append(_ value: String?, key: String?) {

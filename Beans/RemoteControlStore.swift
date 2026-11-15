@@ -38,58 +38,9 @@ final class RemoteControlStore: ObservableObject {
 
     private func apply(_ config: RemoteConfig) {
         // 旧版本曾支持 App 云控；服务端移除后启动时清理历史覆盖值。
+        // 2.2.3：公告写入已删除（全仓库 0 处读取 co.remoteAnnouncement.*），
+        // 远端配置拉取本身保留（服务端用途未确认）。
         clearRemoteOverrides()
-        guard config.enabled else {
-            clearRemoteOverrides()
-            return
-        }
-        let defaults = UserDefaults.standard
-
-        let hasAnnouncementContent = !config.announcement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || !(config.announcementMediaURL ?? config.announcementImageURL ?? "").isEmpty
-        defaults.set(config.announcementEnabled && hasAnnouncementContent, forKey: "co.remoteAnnouncement.enabled")
-        defaults.set(config.announcement, forKey: "co.remoteAnnouncement.text")
-        defaults.set(config.announcementImageURL ?? "", forKey: "co.remoteAnnouncement.imageURL")
-        defaults.set(config.announcementMediaURL ?? config.announcementImageURL ?? "", forKey: "co.remoteAnnouncement.mediaURL")
-        defaults.set(config.announcementMediaType ?? "image", forKey: "co.remoteAnnouncement.mediaType")
-        defaults.set(config.announcementTextColor ?? "", forKey: "co.remoteAnnouncement.textColor")
-        defaults.set(config.updatedAt ?? "", forKey: "co.remoteAnnouncement.updatedAt")
-
-        defaults.synchronize()
-    }
-
-    private func set(_ value: Bool?, key: String, defaults: UserDefaults) {
-        guard let value else {
-            restore(key: key, defaults: defaults)
-            return
-        }
-        rememberOriginal(key: key, defaults: defaults)
-        defaults.set(value, forKey: key)
-    }
-
-
-
-    private func rememberOriginal(key: String, defaults: UserDefaults) {
-        var keys = defaults.stringArray(forKey: appliedKeysKey) ?? []
-        guard !keys.contains(key) else { return }
-        if let current = defaults.object(forKey: key) {
-            defaults.set(current, forKey: originalPrefix + key)
-        } else {
-            defaults.removeObject(forKey: originalPrefix + key)
-        }
-        keys.append(key)
-        defaults.set(keys, forKey: appliedKeysKey)
-    }
-
-    private func restore(key: String, defaults: UserDefaults) {
-        guard let keys = defaults.stringArray(forKey: appliedKeysKey), keys.contains(key) else { return }
-        if let original = defaults.object(forKey: originalPrefix + key) {
-            defaults.set(original, forKey: key)
-        } else {
-            defaults.removeObject(forKey: key)
-        }
-        defaults.removeObject(forKey: originalPrefix + key)
-        defaults.set(keys.filter { $0 != key }, forKey: appliedKeysKey)
     }
 
     private func clearRemoteOverrides() {
