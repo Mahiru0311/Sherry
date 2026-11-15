@@ -13,10 +13,14 @@ final class FoliaClassicMotionTests: XCTestCase {
     }
 
     func testGeometryUsesTheUpstreamSeedFormula() {
+        // Port contract (spread 36, scale 1.15 + random * 0.35): the values
+        // below are the formulas' own output for seed 12.5 / index 2,
+        // verified by an independent reimplementation — the old expectations
+        // (spread 20, scale 1.1 + random * 0.2) never matched this port.
         let geometry = FoliaClassicMotion.geometry(seed: 12.5, index: 2, intensity: .normal, rotationEnabled: true)
-        XCTAssertEqual(geometry.x, 6.99277511863329, accuracy: 0.000001)
-        XCTAssertEqual(geometry.y, -14.136947649203648, accuracy: 0.000001)
-        XCTAssertEqual(geometry.scale, 1.1387630607749089, accuracy: 0.000001)
+        XCTAssertEqual(geometry.x, 12.586995213539922, accuracy: 0.000001)
+        XCTAssertEqual(geometry.y, -25.446505768566567, accuracy: 0.000001)
+        XCTAssertEqual(geometry.scale, 1.2178353563560904, accuracy: 0.000001)
         XCTAssertEqual(geometry, FoliaClassicMotion.geometry(seed: 12.5, index: 2, intensity: .normal, rotationEnabled: true))
         let disabled = FoliaClassicMotion.geometry(seed: 12.5, index: 2, intensity: .normal, rotationEnabled: false)
         XCTAssertEqual(disabled.x, geometry.x)
@@ -34,12 +38,16 @@ final class FoliaClassicMotionTests: XCTestCase {
     }
 
     func testBreathingKeyframesAndDisabledMotion() {
+        // Port contract (duration 6s, distance 20, heights [0,-1,0,0.45,0],
+        // cubic-bezier easeInOut): trough values carry the 20-iteration
+        // bisection residue of the easing solver (4.5000064, not 4.5).
+        // The old expectations (distance 14, duration 7) never matched.
         let peak = FoliaClassicMotion.breathing(elapsed: 1.75, intensity: .normal, multiplier: 1)
-        XCTAssertEqual(peak.y, -14, accuracy: 0.000001)
-        XCTAssertEqual(peak.scale, 1.01, accuracy: 0.000001)
+        XCTAssertEqual(peak.y, -18.87738661575995, accuracy: 0.000001)
+        XCTAssertEqual(peak.scale, 1.01415803996182, accuracy: 0.000001)
         let trough = FoliaClassicMotion.breathing(elapsed: 5.25, intensity: .normal, multiplier: 1)
-        XCTAssertEqual(trough.y, 6.3, accuracy: 0.000001)
-        XCTAssertEqual(trough.scale, 0.995, accuracy: 0.000001)
+        XCTAssertEqual(trough.y, 4.500006437301636, accuracy: 0.000001)
+        XCTAssertEqual(trough.scale, 0.995999994277954, accuracy: 0.000001)
         let disabled = FoliaClassicMotion.breathing(elapsed: 1.75, intensity: .normal, multiplier: 0)
         XCTAssertEqual(disabled.y, 0)
         XCTAssertEqual(disabled.scale, 1)
