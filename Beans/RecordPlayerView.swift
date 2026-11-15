@@ -86,7 +86,7 @@ struct RecordPlayerView: View {
             // second gesture here made this style disappear instantly.
             surface
         }
-        .animation(.easeInOut(duration: 0.22), value: showLyrics)
+        .animation(.snappy(duration: 0.28), value: showLyrics)
         .sheet(isPresented: $showSoftwareVolume) {
             CoSoftwareVolumeSheetHost()
                 .environmentObject(player)
@@ -147,7 +147,7 @@ struct RecordPlayerView: View {
                             Color.clear
                         } else {
                             RecordModeMiniLyrics(lyrics: lyrics) {
-                                withAnimation(.easeInOut(duration: 0.22)) { showLyrics = true }
+                                withAnimation(.snappy(duration: 0.28)) { showLyrics = true }
                             }
                         }
                     }
@@ -196,7 +196,7 @@ struct RecordPlayerView: View {
                         Color.clear
                     } else {
                         RecordModeMiniLyrics(lyrics: lyrics) {
-                            withAnimation(.easeInOut(duration: 0.22)) { showLyrics = true }
+                            withAnimation(.snappy(duration: 0.28)) { showLyrics = true }
                         }
                     }
                 }
@@ -322,7 +322,7 @@ struct RecordPlayerView: View {
                     transportControls
                         .frame(maxWidth: 270)
                     circleButton(icon: "list.bullet", size: 17) {
-                        withAnimation(.easeInOut(duration: 0.22)) {
+                        withAnimation(.snappy(duration: 0.28)) {
                             showQueue = false
                         }
                     }
@@ -347,7 +347,7 @@ struct RecordPlayerView: View {
             onTap: {
                 guard allowsLyrics else { return }
                 if showQueue { showQueue = false }
-                withAnimation(.easeInOut(duration: 0.22)) { showLyrics = true }
+                withAnimation(.snappy(duration: 0.28)) { showLyrics = true }
             },
             onNextTrack: { player.next() },
             onPreviousTrack: { player.previous() }
@@ -423,7 +423,7 @@ struct RecordPlayerView: View {
             circleButton(icon: "forward.fill", size: 16) { player.next() }
                 .frame(maxWidth: .infinity)
             Button {
-                withAnimation(.easeInOut(duration: 0.22)) {
+                withAnimation(.snappy(duration: 0.28)) {
                     showQueue.toggle()
                     if showQueue {
                         showLyrics = false
@@ -549,7 +549,7 @@ struct RecordPlayerView: View {
             if showLyrics {
                 Button {
                     CoHaptics.tap()
-                    withAnimation(.easeInOut(duration: 0.22)) {
+                    withAnimation(.snappy(duration: 0.28)) {
                         showLyrics = false
                     }
                 } label: {
@@ -565,7 +565,7 @@ struct RecordPlayerView: View {
             Menu {
                 if showLyrics || showQueue {
                     Button("返回唱片") {
-                        withAnimation(.easeInOut(duration: 0.22)) {
+                        withAnimation(.snappy(duration: 0.28)) {
                             showLyrics = false
                             showQueue = false
                         }

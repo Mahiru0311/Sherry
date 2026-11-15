@@ -291,7 +291,7 @@ struct RootView: View {
                 )
         }
         .animation(
-            rootLayoutSettled ? .easeInOut(duration: 0.22) : nil,
+            rootLayoutSettled ? .snappy(duration: 0.28) : nil,
             value: selection
         )
         .overlay(alignment: .bottom) {
@@ -506,7 +506,7 @@ struct RootView: View {
             }
         }
         .animation(
-            rootLayoutSettled ? .easeInOut(duration: 0.25) : nil,
+            rootLayoutSettled ? .snappy(duration: 0.28) : nil,
             value: selection
         )
     }

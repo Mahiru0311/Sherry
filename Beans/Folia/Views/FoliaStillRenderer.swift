@@ -37,7 +37,7 @@ struct FoliaStillRenderer: View {
                 }
                 .frame(maxWidth: 896).padding(.horizontal, 36).padding(.bottom, 48)
                 .allowsHitTesting(false)
-                .animation(.easeOut(duration: 0.5), value: effectiveIndex)
+                .animation(.spring(response: 0.45, dampingFraction: 0.85), value: effectiveIndex)
             }
         }
         .onAppear { effectiveIndex = max(0, activeIndex) }

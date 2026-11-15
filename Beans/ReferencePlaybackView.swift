@@ -131,8 +131,8 @@ struct ReferencePlaybackView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     // 一个状态开关，全体 0.38s 同一条贝塞尔曲线：封面弧线收进页眉、歌名缩小、歌词淡入上浮。
-                    .animation(.timingCurve(0.32, 0.72, 0.28, 1, duration: 0.38), value: showLyrics)
-                    .animation(.easeInOut(duration: 0.22), value: showQueue)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.85), value: showLyrics)
+                    .animation(.snappy(duration: 0.28), value: showQueue)
 
                     playbackControls(bottomInset: geometry.safeAreaInsets.bottom)
                 }
@@ -146,7 +146,7 @@ struct ReferencePlaybackView: View {
             coverProgress = showLyrics ? 1 : 0
         }
         .onChange(of: showLyrics) { newValue in
-            withAnimation(.timingCurve(0.32, 0.72, 0.28, 1, duration: 0.38)) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 coverProgress = newValue ? 1 : 0
             }
         }
@@ -350,7 +350,7 @@ struct ReferencePlaybackView: View {
                 // 开关在自定义布局编辑器里（隐藏封面歌词），只影响封面页，完整歌词页不受影响。
                 MiniLyricsPreview(lines: previewLyrics, primary: primaryColor, secondary: secondaryColor) {
                     CoHaptics.tap()
-                    withAnimation(.timingCurve(0.32, 0.72, 0.28, 1, duration: 0.38)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                         showLyrics = true
                     }
                 }
@@ -546,7 +546,7 @@ struct ReferencePlaybackView: View {
                 container: PlayerLayoutEntry()
             ),
             onLyrics: {
-                withAnimation(.timingCurve(0.32, 0.72, 0.28, 1, duration: 0.38)) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                     if showQueue {
                         showQueue = false
                         showLyrics = true
@@ -556,7 +556,7 @@ struct ReferencePlaybackView: View {
                 }
             },
             onQueue: {
-                withAnimation(.easeInOut(duration: 0.22)) {
+                withAnimation(.snappy(duration: 0.28)) {
                     showQueue.toggle()
                 }
             },
@@ -670,7 +670,7 @@ struct ReferencePlaybackView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             CoHaptics.tap()
-            withAnimation(.timingCurve(0.32, 0.72, 0.28, 1, duration: 0.38)) {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                 showLyrics = false
             }
         }
@@ -789,7 +789,7 @@ struct ReferencePlaybackView: View {
         focusedLyricID = nil
         CoHaptics.tap()
         player.seek(to: LyricTiming.seekTime(for: line, userOffset: lyricOffset))
-        withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.3)) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
             proxy.scrollTo(line.id, anchor: .center)
         }
     }
@@ -808,7 +808,7 @@ struct ReferencePlaybackView: View {
         guard let id = currentPlaybackLyricID else { return }
         let action = { proxy.scrollTo(id, anchor: .center) }
         if animated {
-            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.38)) { action() }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { action() }
         } else {
             action()
         }
@@ -1510,7 +1510,7 @@ struct AppleMusicLyricsSection: View {
         focusedLyricID = nil
         CoHaptics.tap()
         onTapLine(line)
-        withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.3)) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
             proxy.scrollTo(line.id, anchor: .center)
         }
     }
@@ -1529,7 +1529,7 @@ struct AppleMusicLyricsSection: View {
         guard let id = currentPlaybackLyricID else { return }
         let action = { proxy.scrollTo(id, anchor: .center) }
         if animated {
-            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.38)) { action() }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { action() }
         } else {
             action()
         }
@@ -1715,7 +1715,7 @@ private func persistentCover(upperSize: CGSize, fullSize: CGSize) -> some View {
     let artworkSize = min(contentWidth, min(fullSize.height * 0.50, 390))
     return Button {
         CoHaptics.tap()
-        withAnimation(.timingCurve(0.32, 0.72, 0.28, 1, duration: 0.38)) {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
             showLyrics.toggle()
         }
     } label: {

@@ -14,6 +14,11 @@ struct PlayerView: View {
     @AppStorage("co.themeMode") private var themeModeRaw = CoThemeMode.system.rawValue
 
     @State private var lyrics: [LyricLine] = []
+    /// 歌词正在抓取：空歌词页在抓取中显示“加载中”，抓完仍为空才显示“暂无歌词 + 重试”，
+    /// 不再一上来就显示“暂无歌词”（2.2.1 之前抓取中的 4 秒空白也被当成没歌词）。
+    @State private var lyricsLoading = false
+    /// 本首歌词抓取已完成但无结果（可点重试）。
+    @State private var lyricsFailed = false
     @State private var showLyrics = false
     @AppStorage("co.player.lastLyricsPage") private var lastLyricsPage = false
     @State private var showQueue = false
@@ -874,7 +879,7 @@ struct PlayerView: View {
                             enabled: layoutMode && layoutEditorUsesIPadLandscape,
                             data: $iPadLandscapeLayoutData
                         ))
-                        .animation(.easeInOut(duration: 0.22), value: showAppleMusicQueue)
+                        .animation(.snappy(duration: 0.28), value: showAppleMusicQueue)
                     }
                     .padding(.horizontal, 34)
                     .padding(.top, 4)
@@ -1200,7 +1205,7 @@ struct PlayerView: View {
                 .frame(maxWidth: .infinity)
                 vinylSideControl(icon: "list.bullet", part: .queue, appliesPortraitLayout: false) {
                     if layoutRenderingStyle == .vinyl || layoutRenderingStyle == .record {
-                        withAnimation(.easeInOut(duration: 0.22)) {
+                        withAnimation(.snappy(duration: 0.28)) {
                             showVinylQueue.toggle()
                         }
                     } else {
@@ -1269,7 +1274,7 @@ struct PlayerView: View {
             ),
             onLyrics: {
                 if showAppleMusicQueue {
-                    withAnimation(.easeInOut(duration: 0.22)) {
+                    withAnimation(.snappy(duration: 0.28)) {
                         showAppleMusicQueue = false
                     }
                 } else {
@@ -1277,7 +1282,7 @@ struct PlayerView: View {
                 }
             },
             onQueue: {
-                withAnimation(.easeInOut(duration: 0.22)) {
+                withAnimation(.snappy(duration: 0.28)) {
                     showAppleMusicQueue.toggle()
                 }
             },
@@ -1548,8 +1553,8 @@ struct PlayerView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.easeInOut(duration: 0.22), value: layoutRenderingShowLyrics)
-        .animation(.easeInOut(duration: 0.22), value: showVinylQueue)
+        .animation(.snappy(duration: 0.28), value: layoutRenderingShowLyrics)
+        .animation(.snappy(duration: 0.28), value: showVinylQueue)
     }
 
     private var vinylQueuePanel: some View {
@@ -1869,15 +1874,35 @@ struct PlayerView: View {
     private var vinylEmptyLyricsView: some View {
         VStack(spacing: 10) {
             Spacer()
-            Image(systemName: "quote.bubble")
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(albumArtistForeground.opacity(0.5))
-            Text("暂无歌词")
-                .font(CoFont.appFont(15, .semibold))
-                .foregroundStyle(albumTitleForeground.opacity(0.9))
-            Text("点击封面区域返回歌曲页面")
-                .font(CoFont.appFont(12))
-                .foregroundStyle(albumArtistForeground.opacity(0.56))
+            if lyricsLoading {
+                ProgressView()
+                    .tint(albumArtistForeground)
+                Text("歌词加载中…")
+                    .font(CoFont.appFont(15, .semibold))
+                    .foregroundStyle(albumTitleForeground.opacity(0.9))
+            } else {
+                Image(systemName: "quote.bubble")
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(albumArtistForeground.opacity(0.5))
+                Text("暂无歌词")
+                    .font(CoFont.appFont(15, .semibold))
+                    .foregroundStyle(albumTitleForeground.opacity(0.9))
+                if lyricsFailed {
+                    Button {
+                        Task { await retryLyrics() }
+                    } label: {
+                        Text("重新加载歌词")
+                            .font(CoFont.appFont(13, .semibold))
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(albumTitleForeground)
+                }
+                Text("点击封面区域返回歌曲页面")
+                    .font(CoFont.appFont(12))
+                    .foregroundStyle(albumArtistForeground.opacity(0.56))
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1972,7 +1997,7 @@ struct PlayerView: View {
         vinylFocusedLyricIndex = nil
         CoHaptics.tap()
         seekToLyric(line)
-        withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.3)) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
             proxy.scrollTo(index, anchor: vinylLyricsFocusAnchor)
         }
     }
@@ -2038,7 +2063,7 @@ struct PlayerView: View {
         guard let index = vinylCurrentLyricIndex else { return }
         let action = { proxy.scrollTo(index, anchor: vinylLyricsFocusAnchor) }
         if animated {
-            withAnimation(.easeInOut(duration: 0.15)) { action() }
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) { action() }
         } else {
             action()
         }
@@ -2054,7 +2079,7 @@ struct PlayerView: View {
             vinylFocusedLyricIndex = nil
             vinylLyricsResumeTask = nil
             if let index = vinylCurrentLyricIndex {
-                withAnimation(.easeInOut(duration: 0.15)) {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
                     proxy.scrollTo(index, anchor: vinylLyricsFocusAnchor)
                 }
             }
@@ -2427,15 +2452,35 @@ struct PlayerView: View {
         VStack(spacing: 0) {
             Spacer(minLength: 40)
             VStack(spacing: 10) {
-                Image(systemName: "quote.bubble")
-                    .font(.system(size: 30, weight: .light))
-                    .foregroundStyle(palette.secondary.opacity(0.7))
-                Text("暂无歌词")
-                    .font(CoFont.appFont(14, .medium))
-                    .foregroundStyle(palette.text)
-                Text("点击左上角封面返回专辑视图")
-                    .font(CoFont.appFont(11))
-                    .foregroundStyle(palette.secondary.opacity(0.8))
+                if lyricsLoading {
+                    ProgressView()
+                        .tint(palette.secondary)
+                    Text("歌词加载中…")
+                        .font(CoFont.appFont(14, .medium))
+                        .foregroundStyle(palette.text)
+                } else {
+                    Image(systemName: "quote.bubble")
+                        .font(.system(size: 30, weight: .light))
+                        .foregroundStyle(palette.secondary.opacity(0.7))
+                    Text("暂无歌词")
+                        .font(CoFont.appFont(14, .medium))
+                        .foregroundStyle(palette.text)
+                    if lyricsFailed {
+                        Button {
+                            Task { await retryLyrics() }
+                        } label: {
+                            Text("重新加载歌词")
+                                .font(CoFont.appFont(13, .semibold))
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 8)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(palette.text)
+                    }
+                    Text("点击左上角封面返回专辑视图")
+                        .font(CoFont.appFont(11))
+                        .foregroundStyle(palette.secondary.opacity(0.8))
+                }
             }
             Spacer(minLength: 40)
         }
@@ -2571,7 +2616,7 @@ struct PlayerView: View {
                     part: .queue,
                     appliesPortraitLayout: appliesPortraitLayout
                 ) {
-                    withAnimation(.easeInOut(duration: 0.22)) {
+                    withAnimation(.snappy(duration: 0.28)) {
                         showVinylQueue.toggle()
                     }
                 }
@@ -3841,7 +3886,7 @@ struct PlayerView: View {
 
     private func toggleLyrics() {
         CoHaptics.tap()
-        withAnimation(.easeInOut(duration: 0.22)) {
+        withAnimation(.snappy(duration: 0.28)) {
             showLyrics.toggle()
         }
     }
@@ -3902,6 +3947,8 @@ struct PlayerView: View {
     private func loadLyrics() async {
         guard let song else { return }
         let identity = song.identityKey
+        lyricsLoading = true
+        lyricsFailed = false
         // 优先用 PlayerManager 与音频并行预取的歌词，避免重复请求
         if let cached = player.cachedLyrics(for: song) {
             lyrics = cached
@@ -3910,7 +3957,31 @@ struct PlayerView: View {
         let parsed = await player.fetchLyrics(for: song)
         guard self.song?.identityKey == identity else { return }
         player.lyricsSyncEngine.setLyrics(parsed)
-        guard !parsed.isEmpty else { return }
+        lyricsLoading = false
+        guard !parsed.isEmpty else {
+            // 抓取完成仍为空：显示“暂无歌词 + 重试”，不是无声空白。
+            lyricsFailed = true
+            return
+        }
+        lyricsFailed = false
+        self.lyrics = parsed
+    }
+
+    /// “暂无歌词”里的重试：清掉这首歌的缓存（含负缓存）重新抓一次。
+    private func retryLyrics() async {
+        guard let song else { return }
+        let identity = song.identityKey
+        lyricsLoading = true
+        lyricsFailed = false
+        let parsed = await SherryLyricsService.shared.retryLyrics(for: song)
+        guard self.song?.identityKey == identity else { return }
+        player.lyricsSyncEngine.setLyrics(parsed)
+        lyricsLoading = false
+        guard !parsed.isEmpty else {
+            lyricsFailed = true
+            return
+        }
+        lyricsFailed = false
         self.lyrics = parsed
     }
 
@@ -4389,7 +4460,7 @@ struct LyricsSection: View {
                             }
                             .onTapGesture {
                                 if selectionMode {
-                                    withAnimation(.easeInOut(duration: 0.2)) { toggleSelect(index) }
+                                    withAnimation(.snappy(duration: 0.25)) { toggleSelect(index) }
                                 } else {
                                     scheduleLyricSelection(index, proxy: proxy)
                                 }
@@ -4408,7 +4479,7 @@ struct LyricsSection: View {
                                 isUserScrolling = false
                                 selectedLyricIndex = nil
                                 CoHaptics.medium()
-                                withAnimation(.easeInOut(duration: 0.2)) {
+                                withAnimation(.snappy(duration: 0.25)) {
                                     if !selectionMode {
                                         selectionMode = true
                                         selected = [index]
@@ -4518,7 +4589,7 @@ struct LyricsSection: View {
                     pendingSeekJump = false
                     proxy.scrollTo(newIndex, anchor: anchor)
                 } else {
-                    withAnimation(.easeInOut(duration: 0.15)) {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
                         proxy.scrollTo(newIndex, anchor: anchor)
                     }
                 }
@@ -4532,7 +4603,7 @@ struct LyricsSection: View {
                 focusedIndex = nil
                 guard let newIndex = currentIndex else { return }
                 DispatchQueue.main.async {
-                    withAnimation(.easeInOut(duration: 0.15)) {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
                         proxy.scrollTo(newIndex, anchor: anchor)
                     }
                 }
@@ -4641,7 +4712,7 @@ struct LyricsSection: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.92)))
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: visualIndex)
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: visualIndex)
     }
 
     private func scheduleLyricResume(_ proxy: ScrollViewProxy) {
@@ -4654,7 +4725,7 @@ struct LyricsSection: View {
             isUserScrolling = false
             selectedLyricIndex = nil
             focusedIndex = nil
-            withAnimation(.easeInOut(duration: 0.15)) { scrollToCurrent(proxy) }
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) { scrollToCurrent(proxy) }
         }
     }
 
@@ -4680,7 +4751,7 @@ struct LyricsSection: View {
         CoHaptics.tap()
         onTapLine(line)
         DispatchQueue.main.async {
-            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.3)) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
                 proxy.scrollTo(index, anchor: anchor)
             }
         }
@@ -4704,7 +4775,7 @@ struct LyricsSection: View {
         guard !text.isEmpty else { return }
         UIPasteboard.general.string = text
         CoHaptics.success()
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(.snappy(duration: 0.25)) {
             selectionMode = false
             selected = []
         }
@@ -4713,7 +4784,7 @@ struct LyricsSection: View {
     private var selectionBar: some View {
         HStack(spacing: 16) {
             Button {
-                withAnimation(.easeInOut(duration: 0.15)) { selected = Set(lyrics.indices) }
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) { selected = Set(lyrics.indices) }
             } label: {
                 Text("全选")
                     .font(CoFont.appFont(13, .medium))
@@ -4730,7 +4801,7 @@ struct LyricsSection: View {
             .buttonStyle(.plain)
             Spacer()
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(.snappy(duration: 0.25)) {
                     selectionMode = false
                     selected = []
                 }

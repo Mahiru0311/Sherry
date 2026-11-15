@@ -1927,7 +1927,7 @@ struct SettingsView: View {
             Button {
                 CoHaptics.select()
                 refreshHiddenPlaylistsSettings()
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(.snappy(duration: 0.28)) {
                     hiddenPlaylistsExpanded.toggle()
                 }
             } label: {
@@ -2118,7 +2118,7 @@ struct SettingsView: View {
             // 外观设置行：点击展开 / 收起全部外观设置
             Button {
                 CoHaptics.select()
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(.snappy(duration: 0.28)) {
                     appearanceExpanded.toggle()
                 }
             } label: {
@@ -2728,7 +2728,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Button {
                 CoHaptics.select()
-                withAnimation(.easeInOut(duration: 0.22)) {
+                withAnimation(.snappy(duration: 0.28)) {
                     playbackExpanded.toggle()
                 }
             } label: {
@@ -2865,7 +2865,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Button {
                 CoHaptics.select()
-                withAnimation(.easeInOut(duration: 0.22)) {
+                withAnimation(.snappy(duration: 0.28)) {
                     backupExpanded.toggle()
                 }
             } label: {
@@ -3183,7 +3183,7 @@ struct SettingsView: View {
             catalogDivider
             VStack(alignment: .leading, spacing: 8) {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { disclaimerExpanded.toggle() }
+                    withAnimation(.snappy(duration: 0.25)) { disclaimerExpanded.toggle() }
                 } label: {
                     HStack(spacing: 9) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -3219,7 +3219,7 @@ struct SettingsView: View {
     private var runtimeEnvironmentFooter: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(.snappy(duration: 0.25)) {
                     runtimeEnvironmentExpanded.toggle()
                 }
             } label: {

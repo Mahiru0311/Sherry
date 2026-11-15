@@ -20,21 +20,27 @@ struct SherryLyricNeed: Hashable {
 }
 
 struct SherryLyricMatchEvaluation: Comparable, Equatable {
+    /// 去版本词后的标题是否相等（Live/DJ/伴奏等后缀不计）：这是准入门槛，
+    /// 不是排序项 —— 2.2.1 之前版本词不一致会直接判死刑，导致带版本后缀
+    /// 的歌在酷狗和 LRCLIB 两边都拿不到歌词。
+    var baseTitleMatches: Bool
+    /// 严格标题匹配（含版本词一致）：排序时优先，不再是准入门槛。
     var titleMatches: Bool
     var artistsMatch: Bool
     var albumMatches: Bool
     var durationErrorMs: Int
     var isWordSynced: Bool
 
-    /// 字典序：标题 → 歌手 → 专辑 → 时长 → 逐字。越 "小" 越好。
+    /// 字典序：基础标题 → 严格标题（含版本）→ 歌手 → 专辑 → 时长 → 逐字。越 "小" 越好。
     static func < (lhs: Self, rhs: Self) -> Bool {
+        if lhs.baseTitleMatches != rhs.baseTitleMatches { return lhs.baseTitleMatches }
         if lhs.titleMatches != rhs.titleMatches { return lhs.titleMatches }
         if lhs.artistsMatch != rhs.artistsMatch { return lhs.artistsMatch }
         if lhs.albumMatches != rhs.albumMatches { return lhs.albumMatches }
         let lhsDurationRank = lhs.durationErrorMs <= SherryLyricsMatcher.perfectDurationToleranceMs
-        ? 0 : lhs.durationErrorMs
+            ? 0 : lhs.durationErrorMs
         let rhsDurationRank = rhs.durationErrorMs <= SherryLyricsMatcher.perfectDurationToleranceMs
-        ? 0 : rhs.durationErrorMs
+            ? 0 : rhs.durationErrorMs
         if lhsDurationRank != rhsDurationRank { return lhsDurationRank < rhsDurationRank }
         if lhs.isWordSynced != rhs.isWordSynced { return lhs.isWordSynced }
         return false
@@ -99,8 +105,13 @@ enum SherryLyricsMatcher {
     }
 
     static func titlesMatch(_ lhs: String, _ rhs: String) -> Bool {
-        normalizeTitle(lhs) == normalizeTitle(rhs)
+        baseTitlesMatch(lhs, rhs)
         && versionTerms(in: lhs) == versionTerms(in: rhs)
+    }
+
+    /// 去版本词后的标题是否相等：准入门槛用这个，版本词只参与排序。
+    static func baseTitlesMatch(_ lhs: String, _ rhs: String) -> Bool {
+        normalizeTitle(lhs) == normalizeTitle(rhs)
     }
 
     static func artistsMatch(_ wanted: String, _ actual: String) -> Bool {
@@ -135,8 +146,17 @@ enum SherryLyricsMatcher {
     title: String, artist: String, album: String?, durationMs: Int?,
     need: SherryLyricNeed, hasWordTimings: Bool
 ) -> SherryLyricMatchEvaluation {
+        let baseTitleMatches = baseTitlesMatch(title, need.title)
         let titleMatches = titlesMatch(title, need.title)
-        let artistsMatch = artistsMatch(need.artist, artist)
+        // 酷狗第三方上传歌词的 singer 字段经常回显歌名（实测 "晴天" 的
+        // singer 就是 "晴天"），不是歌手 —— 候选歌手与候选歌名相同时，
+        // 歌手信息未知，不扣分（否则几乎所有第三方歌词都会排到后面）。
+        let artistsMatch: Bool
+        if artist.isEmpty || normalizeArtist(artist) == normalizeTitle(title) {
+            artistsMatch = true
+        } else {
+            artistsMatch = artistsMatch(need.artist, artist)
+        }
         let albumMatches: Bool
         if let album, let needAlbum = need.album,!needAlbum.isEmpty {
             albumMatches = albumsMatch(album, needAlbum)
@@ -150,6 +170,7 @@ enum SherryLyricsMatcher {
             durationError = .max
         }
         return SherryLyricMatchEvaluation(
+        baseTitleMatches: baseTitleMatches,
         titleMatches: titleMatches,
         artistsMatch: artistsMatch,
         albumMatches: albumMatches,
@@ -168,7 +189,7 @@ enum SherryLyricsMatcher {
         var bestIndex: Int?
         var bestEvaluation: SherryLyricMatchEvaluation?
         for (index, tuple) in tuples.enumerated() {
-            guard let trackName = tuple.trackName, titlesMatch(trackName, title) else { continue }
+            guard let trackName = tuple.trackName, baseTitlesMatch(trackName, title) else { continue }
             let evaluation = evaluateCandidate(
                 title: trackName,
                 artist: "",

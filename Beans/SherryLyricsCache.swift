@@ -25,11 +25,17 @@ final class SherryLyricsCache {
         let source: String
         let timing: String
         let isNegative: Bool
+        /// 暂时的负缓存（网络错 / 搜索被限流 / 两边都没返回数据）：只拦 5 分钟。
+        /// 老文件没有这个字段时按 false 解码，不会让旧缓存失效。
+        let transientNegative: Bool?
         let savedAt: Date
     }
 
     private static let maxAge: TimeInterval = 30 * 24 * 3600
     private static let notFoundMaxAge: TimeInterval = 24 * 3600
+    /// 暂时的失败（限流、超时、断网）只拦 5 分钟：2.2.1 之前一律写 24 小时，
+    /// 一次被限流就让一堆歌一整天没歌词。
+    private static let transientNotFoundMaxAge: TimeInterval = 5 * 60
 
     private let directory: URL
     private let fileManager = FileManager.default
@@ -57,7 +63,12 @@ final class SherryLyricsCache {
             return nil
         }
         let age = Date().timeIntervalSince(entry.savedAt)
-        let limit = entry.isNegative ? Self.notFoundMaxAge : Self.maxAge
+        let limit: TimeInterval
+        if entry.isNegative {
+            limit = (entry.transientNegative ?? false) ? Self.transientNotFoundMaxAge : Self.notFoundMaxAge
+        } else {
+            limit = Self.maxAge
+        }
         guard age >= 0, age < limit else {
             try? fileManager.removeItem(at: url)
             return nil
@@ -74,16 +85,19 @@ final class SherryLyricsCache {
             source: document.source.rawValue,
             timing: document.timing.rawValue,
             isNegative: false,
+            transientNegative: false,
             savedAt: Date()
         )
         store(entry: entry, key: key)
     }
 
     /// 负缓存：这首歌两个源都查不到，24 小时内不再请求。
-    func storeNegative(key: String) {
+    /// transient = true 时只拦 5 分钟（限流 / 超时 / 断网等暂时失败，
+    /// 不是“确实没歌词”，不能按 24 小时算）。
+    func storeNegative(key: String, transient: Bool = false) {
         let entry = Entry(
             lrc: "", krc: nil, source: "", timing: "",
-            isNegative: true, savedAt: Date()
+            isNegative: true, transientNegative: transient, savedAt: Date()
         )
         store(entry: entry, key: key)
     }

@@ -4,7 +4,7 @@ import Foundation
 /// 机制参考 LyricsIsland (MIT) 的 LRCLIBClient，按 Sherry 模型改写。
 enum SherryLRCLIB {
     private static let baseURL = URL(string: "https://lrclib.net")!
-    private static let userAgent = "Sherry/2.2.0 (personal project)"
+    private static let userAgent = "Sherry/2.2.1 (personal project)"
     private static let timeout: TimeInterval = 15
 
     struct Response: Decodable {

@@ -97,7 +97,7 @@ struct FoliaPartitaView: View {
                         .frame(width: 220, height: 1).rotationEffect(.degrees(18))
                 }
                 .allowsHitTesting(false)
-                .animation(.spring(response: 0.5, dampingFraction: 0.68), value: effectiveIndex)
+                .animation(.spring(response: 0.38, dampingFraction: 0.8), value: effectiveIndex)
             }
         }
         .onAppear { effectiveIndex = max(0, activeIndex) }
@@ -175,7 +175,7 @@ struct FoliaLumiereView: View {
                     }
                     .frame(maxWidth: 896).padding(.horizontal, 48).padding(.bottom, 64)
                     .allowsHitTesting(false)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.68), value: effectiveIndex)
+                    .animation(.spring(response: 0.38, dampingFraction: 0.8), value: effectiveIndex)
                 }
             }
         }
@@ -296,7 +296,7 @@ struct FoliaFumeView: View {
         }
         .frame(maxWidth: 896).padding(.horizontal, 48).padding(.bottom, 64)
         .allowsHitTesting(false)
-        .animation(.spring(response: 0.5, dampingFraction: 0.68), value: effectiveIndex)
+        .animation(.spring(response: 0.38, dampingFraction: 0.8), value: effectiveIndex)
         .onAppear { effectiveIndex = max(0, activeIndex) }
         .onChange(of: activeIndex) { _, index in updateIndex(index) }
         .onChange(of: document) { _, _ in updateIndex(activeIndex) }

@@ -1071,6 +1071,9 @@ final class PlayerManager: NSObject, ObservableObject {
                 }
                 if player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
                     self.isBuffering = true
+                    // 歌词时钟冻结：音频等数据时墙钟外推会让歌词跑到音频前面
+                    // （2.2.1 根因 D1），恢复后观察者回调会重新锚定。
+                    self.lyricsSyncEngine.setStalled(true)
                     // 中途卡顿（已开播后才等数据）：60 秒内攒够 3 次就降一档；开局缓冲不算（还没 playbackConfirmed）。
                     if self.playbackConfirmed {
                         let now = ProcessInfo.processInfo.systemUptime
@@ -1187,10 +1190,10 @@ final class PlayerManager: NSObject, ObservableObject {
                     self.duration = seconds
                 }
             }
-            // 歌词时钟锚点：0.05s 观察者每次报位置都喂给同步引擎（抖动 ≤2s
-            // 保留旧锚点外推，seek / 切歌才重锚）；播到尾段触发下一首预取。
+            // 歌词时钟锚点：0.05s 观察者每次报位置都喂给同步引擎（每次回调
+            // 都重锚，锚点永不陈旧；>2s 的跳变当作 seek；倍速参与外推）。
             if time.seconds.isFinite {
-                self.lyricsSyncEngine.apply(position: time.seconds, isPlaying: self.isPlaying, duration: self.duration)
+                self.lyricsSyncEngine.apply(position: time.seconds, isPlaying: self.isPlaying, duration: self.duration, rate: self.rate)
                 if !self.lyricSyncActive { self.lyricSyncActive = true }
                 self.maybePrefetchNextTrack()
             }

@@ -127,7 +127,7 @@ struct MiniPlayerView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .animation(.easeInOut(duration: 0.25), value: currentLyricLine?.text)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.85), value: currentLyricLine?.text)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }

@@ -103,11 +103,12 @@ enum SherryKugouLyrics {
         durationMs: Int?
     ) async -> [Candidate] {
         // 探针结论："歌手 歌名" + 时长经常 0 候选；歌名 + 时长最稳。
-        let artistText = artists.joined(separator: " ")
+        // 2.2.1：第三次尝试（"歌名 歌手"）实测基本查不到，还白白烧限流
+        // 配额（连续查歌时搜索接口会限流，返回 200 空候选），直接去掉，
+        // 只留两次：歌名+时长 → 歌名。
         let attempts: [(keyword: String, duration: Int?)] = [
             (title, durationMs),
             (title, nil),
-            (artistText.isEmpty ? title : "\(title) \(artistText)", nil),
         ]
         var seen: Set<String> = []
         var out: [Candidate] = []

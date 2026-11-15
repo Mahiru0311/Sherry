@@ -59,7 +59,7 @@ struct FoliaClassicRenderer: View {
                         }
                     }
                     .frame(maxWidth: 1152, minHeight: min(300, viewport.size.height * 0.5))
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.35), value: activeLine?.id)
+                    .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.88), value: activeLine?.id)
                 }
                 Spacer(minLength: 16)
                 if showText { subtitle(time: time, activeIndex: activeIndex, activeLine: activeLine).font(.system(size: 20 * fontScale * subtitleScale)) }

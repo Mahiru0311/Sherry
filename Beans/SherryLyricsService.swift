@@ -134,6 +134,15 @@ actor SherryLyricsService {
         _ = await lyrics(for: song)
     }
 
+    /// 手动重试：清掉这首歌的缓存（含负缓存），重新走网络抓一次。
+    /// 供“暂无歌词”里的重试按钮用；正在进行的请求会被复用，不重复发。
+    func retryLyrics(for song: Song) async -> [LyricLine] {
+        let key = Self.cacheKey(for: song)
+        cache.remove(key: key)
+        CoLogger.shared.log("歌词手动重试：\(song.name) 已清除缓存，重新抓取", level: .info)
+        return await lyrics(for: song)
+    }
+
     // MARK: - 抓取链路
 
     private func fetchAndCache(song: Song, key: String) async -> [LyricLine] {
@@ -142,7 +151,11 @@ actor SherryLyricsService {
             "歌词抓取开始：\(song.name) - \(song.artists) 时长=\(durationMs.map { "\($0)ms" } ?? "-")",
             level: .info
         )
-        // 1) 酷狗匿名：元数据排序后只取前 3 个下正文（lazy）。
+        // 是否真正看过候选正文并逐一打分：只有这种情况下“无结果”才是
+        // 确实没歌词（写 24h 负缓存）；否则只是暂时失败（限流/超时/断网，
+        // 只写 5 分钟负缓存）。
+        var evaluatedAnyCandidate = false
+        // 1) 酷狗匿名：元数据排序后只取前 5 个下正文（并行）。
         let candidates = await SherryKugouLyrics.search(
             title: song.name, artists: [song.artists], album: song.album.isEmpty ? nil : song.album,
             durationMs: durationMs
@@ -164,28 +177,43 @@ actor SherryLyricsService {
                 )
                 return left == right ? false : left < right
             }
-            for candidate in ranked.prefix(3) {
-                guard let doc = await SherryKugouLyrics.document(for: candidate, wantedDurationMs: durationMs),
-                      !doc.lines.isEmpty else { continue }
-                let evaluation = SherryLyricMatchEvaluation.evaluate(
-                    wantedTitle: song.name, wantedArtists: [song.artists],
-                    wantedAlbum: song.album.isEmpty ? nil : song.album, wantedDurationMs: durationMs,
-                    candidateTitle: doc.title ?? candidate.title,
-                    candidateArtists: doc.artists.isEmpty ? candidate.artists : doc.artists,
-                    candidateAlbum: doc.album ?? candidate.album,
-                    candidateDurationMs: doc.durationMs ?? candidate.durationMs,
-                    isWordSynced: doc.isWordSynced
-                )
+            // 前 5 个候选并行下载正文（旧版串行：3 个候选最坏多等 2 倍下载
+            // 时间，首屏歌词来得更晚）。TaskGroup 内不写共享状态，只返回
+            // 结果，收齐后再挑最优。
+            let downloaded = await withTaskGroup(of: (SherryLyricDocument, SherryLyricMatchEvaluation)?.self) { group in
+                for candidate in ranked.prefix(5) {
+                    group.addTask {
+                        guard let doc = await SherryKugouLyrics.document(for: candidate, wantedDurationMs: durationMs),
+                              !doc.lines.isEmpty else { return nil }
+                        let evaluation = SherryLyricMatchEvaluation.evaluate(
+                            wantedTitle: song.name, wantedArtists: [song.artists],
+                            wantedAlbum: song.album.isEmpty ? nil : song.album, wantedDurationMs: durationMs,
+                            candidateTitle: doc.title ?? candidate.title,
+                            candidateArtists: doc.artists.isEmpty ? candidate.artists : doc.artists,
+                            candidateAlbum: doc.album ?? candidate.album,
+                            candidateDurationMs: doc.durationMs ?? candidate.durationMs,
+                            isWordSynced: doc.isWordSynced
+                        )
+                        return (doc, evaluation)
+                    }
+                }
+                var collected: [(SherryLyricDocument, SherryLyricMatchEvaluation)] = []
+                for await item in group {
+                    if let item { collected.append(item) }
+                }
+                return collected
+            }
+            for (doc, evaluation) in downloaded {
                 CoLogger.shared.log(
-                    "歌词候选：酷狗 id=\(candidate.id) 标题=\(doc.title ?? candidate.title) 歌手=\(doc.artists.joined(separator: "/")) 时长差=\(evaluation.durationErrorMs == .max ? -1 : evaluation.durationErrorMs)ms 逐字=\(evaluation.isWordSynced ? "是" : "否") 标题匹配=\(evaluation.titleMatches ? "是" : "否")",
+                    "歌词候选：酷狗 标题=\(doc.title ?? song.name) 歌手=\(doc.artists.joined(separator: "/")) 时长差=\(evaluation.durationErrorMs == .max ? -1 : evaluation.durationErrorMs)ms 逐字=\(evaluation.isWordSynced ? "是" : "否") 标题匹配=\(evaluation.titleMatches ? "是" : "否")",
                     level: .debug
                 )
+                evaluatedAnyCandidate = true
                 if best == nil || evaluation < best!.evaluation {
                     best = (doc, evaluation)
                 }
-                if evaluation.isPerfect { break }
             }
-            if let best, best.evaluation.titleMatches {
+            if let best, best.evaluation.baseTitleMatches {
                 return accept(document: best.document, evaluation: best.evaluation, song: song, key: key)
             }
             if let best {
@@ -211,9 +239,12 @@ actor SherryLyricsService {
             )
             return accept(document: doc, evaluation: evaluation, song: song, key: key)
         }
-        // 3) 两个源都无结果：写负缓存，24 小时内不再请求。
-        cache.storeNegative(key: key)
-        CoLogger.shared.log("歌词无结果：\(song.name) - \(song.artists)（已写负缓存 24h）", level: .info)
+        // 3) 两个源都无结果：只有真正看过候选正文并全部否掉时才写 24 小时负缓存。
+        // 搜不到任何候选（限流 / 超时 / 断网）只是“暂时失败”，只拦 5 分钟，
+        // 否则一次被限流就让一堆歌一整天没歌词（2.2.1 根因 N2）。
+        let transient = !evaluatedAnyCandidate
+        cache.storeNegative(key: key, transient: transient)
+        CoLogger.shared.log("歌词无结果：\(song.name) - \(song.artists)（已写负缓存 \(transient ? "5 分钟（暂时失败）" : "24h")）", level: .info)
         return []
     }
 
