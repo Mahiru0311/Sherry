@@ -4605,17 +4605,18 @@ struct LyricsSection: View {
             }
             .onChange(of: player.seekRevision) { _ in
                 // 滑动进度条是明确的“跟随播放”指令：正在浏览歌词也要立刻跟回来，别等 3 秒回落。
+                // 2.2.5：只置标志位、不在这里滚动 —— seekRevision 触发时
+                // currentIndex 仍由拖动前的锚点算出，旧版的
+                // DispatchQueue.main.async { scrollTo(旧行) } 若在重锚后
+                // 的正确滚动之后执行，视口会被钉回拖动前的行、直到下一行
+                // 才跟回来（Rank 1 竞态）。与黑胶布局同款：滚动只由重锚后
+                // currentIndex 的变化驱动（见上面 .onChange(of: currentIndex)，
+                // pendingSeekJump 置位时直接定位、不做动画）。
                 pendingSeekJump = true
                 resumeScrollTask?.cancel()
                 isUserScrolling = false
                 selectedLyricIndex = nil
                 focusedIndex = nil
-                guard let newIndex = currentIndex else { return }
-                DispatchQueue.main.async {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-                        proxy.scrollTo(newIndex, anchor: anchor)
-                    }
-                }
             }
             .onDisappear {
                 lyricTapTask?.cancel()

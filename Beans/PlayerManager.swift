@@ -463,12 +463,29 @@ final class PlayerManager: NSObject, ObservableObject {
         pendingSeekSetUptime = ProcessInfo.processInfo.systemUptime
         resetListeningProgress()
         seekRevision &+= 1
+        let revision = seekRevision
+        let seekSongKey = currentSong?.identityKey
+        // 2.2.5：seek 同步重锚歌词引擎 —— 引擎之前只能靠 0.05s 观察者
+        // 的下一次回调才知道 seek 发生过；观察者一旦报旧时间/报晚了，
+        // 歌词时钟就继续拿拖动前的锚点外推，拖完一直 lag。先锚到目标，
+        // 再由下面的 completion handler 落点后锚一次（双保险）。
+        lyricsSyncEngine.apply(position: clamped, isPlaying: isPlaying, duration: duration, rate: rate)
         // 0.25 秒容差：精确到帧要现解码才出声（滑动就卡一下），0.25 秒听不出来、行级歌词也不受影响。
         player?.seek(
             to: CMTime(seconds: clamped, preferredTimescale: 600),
             toleranceBefore: CMTime(seconds: 0.25, preferredTimescale: 600),
             toleranceAfter: CMTime(seconds: 0.25, preferredTimescale: 600)
-        )
+        ) { [weak self] finished in
+            guard finished else { return }
+            DispatchQueue.main.async { [weak self] in
+                // 只有这笔 seek 仍是最新的一笔才重锚：连续拖动时旧的
+                // completion 绝不能把引擎拉回已经作废的目标。
+                guard let self,
+                      self.currentSong?.identityKey == seekSongKey,
+                      self.seekRevision == revision else { return }
+                self.lyricsSyncEngine.apply(position: clamped, isPlaying: self.isPlaying, duration: self.duration, rate: self.rate)
+            }
+        }
         updateNowPlaying()
         savePersistedPlaybackState()
     }
@@ -507,6 +524,10 @@ final class PlayerManager: NSObject, ObservableObject {
                     self.isPlaying = true
                     self.startListeningSegment()
                 }
+                // 2.2.5：歌词点选落点后同样重锚引擎（与 seek(to:) 的
+                // completion handler 同款；isPlaying 已按恢复意图更新，
+                // 所以锚点状态与实际播放状态一致）。
+                self.lyricsSyncEngine.apply(position: target, isPlaying: self.isPlaying, duration: self.duration, rate: self.rate)
                 self.updateNowPlaying()
                 self.savePersistedPlaybackState()
                 self.seekRevision &+= 1
@@ -1258,8 +1279,14 @@ final class PlayerManager: NSObject, ObservableObject {
             }
             // 歌词时钟锚点：0.05s 观察者每次报位置都喂给同步引擎（每次回调
             // 都重锚，锚点永不陈旧；>2s 的跳变当作 seek；倍速参与外推）。
+            // 2.2.5：seek 未落点时不喂 —— seek(to:) 已把引擎同步锚到
+            // 目标位置，落点前观察者报的还是旧时间，直接喂会把锚点拉回
+            // 拖动前、再由落点回调拉回来，来回跳一次；pendingSeekTarget
+            // 放开（落点误差 ≤0.5s 或 3s 超时）的那一刻起恢复正常喂入。
             if time.seconds.isFinite {
-                self.lyricsSyncEngine.apply(position: time.seconds, isPlaying: self.isPlaying, duration: self.duration, rate: self.rate)
+                if self.pendingSeekTarget == nil {
+                    self.lyricsSyncEngine.apply(position: time.seconds, isPlaying: self.isPlaying, duration: self.duration, rate: self.rate)
+                }
                 if !self.lyricSyncActive { self.lyricSyncActive = true }
                 self.maybePrefetchNextTrack()
             }

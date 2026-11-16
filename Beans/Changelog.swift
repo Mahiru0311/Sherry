@@ -53,6 +53,18 @@ enum ChangelogStore {
 
     static let logs: [VersionLog] = [
         VersionLog(
+            id: "2.2.5",
+            version: "2.2.5",
+            title: "拖动进度条后歌词不再掉同步",
+            notices: [],
+            features: [],
+            fixes: [
+                "拖动进度条/点按进度条/锁屏拖动后，歌词立即跳到新位置，不再停在拖动前的行",
+                "暂停时拖动进度条，高亮同样立即跳到新行",
+                "没歌词的歌拖动后仍显示无歌词，不硬凑歌词",
+            ]
+        ),
+        VersionLog(
             id: "2.2.4",
             version: "2.2.4",
             title: "歌词错版拒收 + 跨源偏移校正 + 引擎防冻",
