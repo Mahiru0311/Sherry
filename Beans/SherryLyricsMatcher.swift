@@ -165,13 +165,16 @@ enum SherryLyricsMatcher {
 
     /// 跨源排序：逐字优先 → 覆盖率（封顶 1.0）→ 源优先级（酷狗 > 酷我 >
     /// LRCLIB）→ 时长误差。只排已通过拒收门的文档。
+    /// 覆盖率差 <0.5% 视为平手（尾行差零点几秒是各源收尾噪声，不是
+    /// 完整度差距），由源优先级定 —— 否则晴天这类健康歌会因酷我尾行
+    /// 晚 0.4s 就无故从酷狗换成酷我。
     static func ranked(documents: [SherryLyricDocument], audioDurationMs: Int?) -> [SherryLyricDocument] {
         let sourcePriority: [SherryLyricDocument.Source: Int] = [.kugou: 0, .kuwo: 1, .lrclib: 2]
         return documents.sorted { lhs, rhs in
             if lhs.isWordSynced != rhs.isWordSynced { return lhs.isWordSynced }
             let lhsCoverage = min(coverageRatio(of: lhs, audioDurationMs: audioDurationMs) ?? 0, 1.0)
             let rhsCoverage = min(coverageRatio(of: rhs, audioDurationMs: audioDurationMs) ?? 0, 1.0)
-            if abs(lhsCoverage - rhsCoverage) > 0.001 { return lhsCoverage > rhsCoverage }
+            if abs(lhsCoverage - rhsCoverage) > 0.005 { return lhsCoverage > rhsCoverage }
             if sourcePriority[lhs.source] != sourcePriority[rhs.source] {
                 return (sourcePriority[lhs.source] ?? 99) < (sourcePriority[rhs.source] ?? 99)
             }
