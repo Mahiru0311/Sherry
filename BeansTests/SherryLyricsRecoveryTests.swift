@@ -173,11 +173,11 @@ final class SherryLyricsRecoveryTests: XCTestCase {
             XCTAssertNil(kept, "酷狗短版碎片必须被拒收，且只丢该候选、不中断后续源")
         }
         let kuwo = timedDoc(source: .kuwo, count: 68, last: 245.13, durationMs: 293_000)
-        XCTAssertNotNil(await service.gated(kuwo, song: song, durationMs: 294_000),
-                        "酷我 293s Live 版必须顶上")
+        let kuwoKept = await service.gated(kuwo, song: song, durationMs: 294_000)
+        XCTAssertNotNil(kuwoKept, "酷我 293s Live 版必须顶上")
         let lrclib = timedDoc(source: .lrclib, count: 41, last: 226.47, durationMs: 294_000)
-        XCTAssertNotNil(await service.gated(lrclib, song: song, durationMs: 294_000),
-                        "LRCLIB 294s 版必须顶上（覆盖率 77.0%，余量最薄）")
+        let lrclibKept = await service.gated(lrclib, song: song, durationMs: 294_000)
+        XCTAssertNotNil(lrclibKept, "LRCLIB 294s 版必须顶上（覆盖率 77.0%，余量最薄）")
     }
 
     func testSearchAttemptsCarryNoBogusDurationWhenUnknown() {
