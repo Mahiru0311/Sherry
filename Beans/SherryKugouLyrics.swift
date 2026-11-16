@@ -2,7 +2,8 @@ import Compression
 import Foundation
 
 /// 一份抓到的歌词：来源、行级时间、逐字时间（如果有）、原始文本（供缓存）。
-struct SherryLyricDocument {
+/// Equatable：三角测量用 firstIndex 定位首选文档（2.2.4）。
+struct SherryLyricDocument: Equatable {
     enum Source: String, Codable {
         case kugou
         case lrclib
@@ -30,6 +31,33 @@ struct SherryLyricDocument {
 
     var isWordSynced: Bool {
         timing == .wordSynced && lines.contains { $0.hasWordTimings }
+    }
+
+    /// 整体平移时间轴（2.2.4 三角测量：离群文档保留逐字、按共识修正）：
+    /// 行时间与词时间同移同量，钳制 ≥0；其余字段不动。注意缓存写的是
+    /// 平移后的行，但 rawLRC/rawKRC 仍是源文件原文 —— 重载后解析出的
+    /// 行时间会回到原文时间；因此平移只用于本次播放的内存文档，不直接
+    /// 写缓存（见 Service.accept：平移过的文档不进磁盘缓存，下次仍以
+    /// 原文重算，避免缓存里的时间与原文对不上）。
+    func shifted(by seconds: Double) -> SherryLyricDocument {
+        guard seconds != 0 else { return self }
+        let shiftedLines = lines.map { line in
+            var shifted = LyricLine(
+                time: max(0, line.time + seconds),
+                text: line.text,
+                translation: line.translation,
+                words: line.words?.map {
+                    LyricWord(text: $0.text, start: max(0, $0.start + seconds), duration: $0.duration)
+                }
+            )
+            shifted.synthesizedWords = line.synthesizedWords
+            return shifted
+        }
+        return SherryLyricDocument(
+            source: source, timing: timing, lines: shiftedLines,
+            title: title, artists: artists, album: album, durationMs: durationMs,
+            rawLRC: rawLRC, rawKRC: rawKRC
+        )
     }
 }
 
@@ -229,7 +257,9 @@ enum SherryKugouLyrics {
                 title: resolvedTitle(tagTitle: tags["ti"], candidateTitle: title),
                 artists: tags["ar"].map { SherryLyricsMatcher.splitArtists($0) } ?? artists,
                 album: tags["al"],
-                durationMs: durationMs,
+                // 2.2.4：备用端点不返回歌词版本时长，填 wanted 会让时长门
+                // 永远通过；未知就是 nil，由覆盖率门（行时间）来判。
+                durationMs: nil,
                 rawLRC: text,
                 rawKRC: nil
             )
@@ -300,7 +330,7 @@ enum SherryKugouLyrics {
     }
 
     /// 下一个候选的正文：有 KRC 先下 KRC（逐字），失败再下 LRC（行级）。
-    static func document(for candidate: Candidate, wantedDurationMs: Int?) async -> SherryLyricDocument? {
+    static func document(for candidate: Candidate) async -> SherryLyricDocument? {
         if candidate.hasKRC,
            let data = await download(id: candidate.id, accessKey: candidate.accessKey, format: "krc"),
            let decoded = decodeKRC(data, candidateID: candidate.id),
@@ -325,7 +355,9 @@ enum SherryKugouLyrics {
             title: resolvedTitle(tagTitle: tags["ti"], candidateTitle: candidate.title),
             artists: tags["ar"].map { SherryLyricsMatcher.splitArtists($0) } ?? candidate.artists,
             album: tags["al"] ?? candidate.album,
-            durationMs: candidate.durationMs ?? wantedDurationMs,
+            // 2.2.4：不用 wantedDurationMs 兜底 —— 那会让时长门永远通过；
+            // 候选没给时长就是未知（nil），由覆盖率门（行时间）来判。
+            durationMs: candidate.durationMs,
             rawLRC: text,
             rawKRC: nil
         )

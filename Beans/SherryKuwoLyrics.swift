@@ -164,11 +164,16 @@ enum SherryKuwoLyrics {
             }
         }
         if let best { return best.item }
-        // 最后兜底：编辑距离。
+        // 最后兜底：编辑距离。2.2.4：兜底绝不绕过 ±5s 时长门 —— 没有候选
+        // 在 ±5s 内时，宁可无歌词也不拿错版歌词（慌啥子嘛 189s 版就是
+        // 这样被兜底选中的）；时长未知的候选也不参与兜底。
         let normTitle = SherryLyricsMatcher.normalizeTitle(title)
         var closest: (item: SearchItem, distance: Int)?
         for item in items {
             guard let name = item.name else { continue }
+            if let wanted = durationMs, let got = item.durationSeconds,
+               abs(Int(got * 1000) - wanted) > 5000 { continue }
+            if durationMs != nil, item.durationSeconds == nil { continue }
             let distance = SherryLyricsMatcher.editDistance(
                 SherryLyricsMatcher.normalizeTitle(name), normTitle
             )

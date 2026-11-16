@@ -42,9 +42,13 @@ actor SherryLyricsService {
     /// 同步读缓存（磁盘 + 旧 UserDefaults 迁移），不发网。
     /// nonisolated：磁盘读与解析都不需要 actor 隔离，供 PlayerView 先渲染用。
     /// 返回 nil = 未命中（需要再调 lyrics(for:)）；返回 [] = 已知无歌词。
+    /// 2.2.4：缓存条目也要过覆盖率门 —— 2.2.3 及之前已把错版歌词（如
+    /// 189s 的慌啥子嘛）写进缓存，不过门就删条目、重新走网络，不再
+    /// 把错版歌词当命中返回。
     static func cachedLinesSync(for song: Song) -> [LyricLine]? {
         let key = cacheKey(for: song)
         let cache = SherryLyricsCache.shared
+        let audioDurationMs = song.duration > 0 ? Int((song.duration * 1000).rounded()) : nil
         if let hit = cache.lookup(key: key) {
             if hit.isNegative {
                 CoLogger.shared.log("歌词缓存命中（负缓存）：\(song.name)", level: .debug)
@@ -52,12 +56,18 @@ actor SherryLyricsService {
             }
             let lines = parseCached(lrc: hit.lrc, krc: hit.krc, source: hit.source)
             if !lines.isEmpty {
-                CoLogger.shared.log("歌词缓存命中：\(song.name) 来源=\(hit.source) 行数=\(lines.count)", level: .debug)
-                return finalize(lines: lines, timing: SherryLyricDocument.Timing(rawValue: hit.timing) ?? .synced)
+                if SherryLyricsMatcher.coverageRejects(lines: lines, audioDurationMs: audioDurationMs) {
+                    CoLogger.shared.log("歌词缓存过期：\(song.name) 缓存歌词覆盖率不符音频时长，已删除重抓", level: .info)
+                    cache.remove(key: key)
+                } else {
+                    CoLogger.shared.log("歌词缓存命中：\(song.name) 来源=\(hit.source) 行数=\(lines.count)", level: .debug)
+                    return finalize(lines: lines, timing: SherryLyricDocument.Timing(rawValue: hit.timing) ?? .synced)
+                }
+            } else {
+                // 磁盘里有条目但解析出 0 行：当作投毒条目删掉，重新走网络。
+                CoLogger.shared.log("歌词缓存投毒：\(song.name) 磁盘条目解析 0 行，已删除", level: .debug)
+                cache.remove(key: key)
             }
-            // 磁盘里有条目但解析出 0 行：当作投毒条目删掉，重新走网络。
-            CoLogger.shared.log("歌词缓存投毒：\(song.name) 磁盘条目解析 0 行，已删除", level: .debug)
-            cache.remove(key: key)
         }
         // 一次性迁移：旧版 UserDefaults 缓存（co.lyrics.cache.v1.*，14 天）里
         // 的有效条目搬进磁盘缓存，老用户升级后已缓存的歌词不用重新请求。
@@ -67,14 +77,11 @@ actor SherryLyricsService {
         return nil
     }
 
-    /// 行级歌词（只有 LRC、无逐字）合成逐字扫掠，让高亮能逐词走；
-    /// 逐字歌词与无时间轴的纯文本不合成。
+    /// 2.2.4：行级歌词不再合成假逐字扫掠 —— 用户规则：没有逐字时间
+    /// 就干净地按行级显示，绝不伪造词时间。逐字文档原样返回；
+    /// LyricParser.withSynthesizedWords 保留给单测，不再参与链路。
     static func finalize(lines: [LyricLine], timing: SherryLyricDocument.Timing) -> [LyricLine] {
-        guard timing == .synced, !lines.contains(where: { $0.hasWordTimings }) else {
-            return lines
-        }
-        CoLogger.shared.log("歌词逐字合成：行级歌词 \(lines.count) 行已合成逐字扫掠", level: .debug)
-        return LyricParser.withSynthesizedWords(lines)
+        lines
     }
 
     /// 缓存重载按来源分发（2.2.3）：酷我条目的 lrc 是去标签的行级文本、
@@ -107,6 +114,12 @@ actor SherryLyricsService {
             lines = LyricParser.parse(entry.lyric, translationRaw: entry.translation)
         }
         guard !lines.isEmpty else { return nil }
+        // 2.2.4：迁移的旧缓存同样过覆盖率门，错版歌词不搬进新缓存。
+        let audioDurationMs = song.duration > 0 ? Int((song.duration * 1000).rounded()) : nil
+        if SherryLyricsMatcher.coverageRejects(lines: lines, audioDurationMs: audioDurationMs) {
+            CoLogger.shared.log("歌词缓存迁移跳过：\(song.name) 旧缓存歌词覆盖率不符音频时长", level: .info)
+            return nil
+        }
         let doc = SherryLyricDocument(
             source: .kugou, timing: lines.contains { $0.hasWordTimings } ? .wordSynced : .synced,
             lines: lines, title: song.name, artists: [song.artists],
@@ -163,13 +176,16 @@ actor SherryLyricsService {
             "歌词抓取开始：\(song.name) - \(song.artists) 时长=\(durationMs.map { "\($0)ms" } ?? "-")",
             level: .info
         )
+        // 2.2.4：不再“首源命中即返回”—— 各源过拒收门的正文都进候选池，
+        // 最后由三角测量定夺（离群源只有多源比对才能发现；错版/片段歌词
+        // 被拒收后由下一源顶上，全部拒收则诚实降级为无歌词）。
+        var survivors: [SherryLyricDocument] = []
         // 1) 酷狗匿名：先按标题基础匹配过滤，再取前 5 个下正文（并行）。
         // 旧版先取前 5 再过滤：标题不对的前 5 个会挤掉后面真正匹配的候选（P1-2）。
         let candidates = await SherryKugouLyrics.search(
             title: song.name, artists: [song.artists], album: song.album.isEmpty ? nil : song.album,
             durationMs: durationMs
         )
-        var best: (document: SherryLyricDocument, evaluation: SherryLyricMatchEvaluation)?
         if !candidates.isEmpty {
             let scored = candidates.map { candidate in
                 (candidate, SherryLyricMatchEvaluation.evaluate(
@@ -192,7 +208,7 @@ actor SherryLyricsService {
             let downloaded = await withTaskGroup(of: (SherryLyricDocument, SherryLyricMatchEvaluation)?.self) { group in
                 for (candidate, _) in eligible.prefix(5) {
                     group.addTask {
-                        guard let doc = await SherryKugouLyrics.document(for: candidate, wantedDurationMs: durationMs),
+                        guard let doc = await SherryKugouLyrics.document(for: candidate),
                               !doc.lines.isEmpty else { return nil }
                         let evaluation = SherryLyricMatchEvaluation.evaluate(
                             wantedTitle: song.name, wantedArtists: [song.artists],
@@ -212,21 +228,22 @@ actor SherryLyricsService {
                 }
                 return collected
             }
+            // 2.2.4：所有标题匹配且过拒收门的正文都进候选池，不再只取
+            // 最佳一份 —— 离群源要靠多源比对才能发现。
             for (doc, evaluation) in downloaded {
                 CoLogger.shared.log(
                     "歌词候选：酷狗 标题=\(doc.title ?? song.name) 歌手=\(doc.artists.joined(separator: "/")) 时长差=\(evaluation.durationErrorMs == .max ? -1 : evaluation.durationErrorMs)ms 逐字=\(evaluation.isWordSynced ? "是" : "否") 标题匹配=\(evaluation.titleMatches ? "是" : "否")",
                     level: .debug
                 )
-                if best == nil || evaluation < best!.evaluation {
-                    best = (doc, evaluation)
+                guard evaluation.baseTitleMatches else {
+                    CoLogger.shared.log("歌词候选弃用：酷狗标题不匹配：\(song.name)", level: .debug)
+                    continue
+                }
+                if let kept = gated(doc, song: song, durationMs: durationMs) {
+                    survivors.append(kept)
                 }
             }
-            if let best, best.evaluation.baseTitleMatches {
-                return accept(document: best.document, evaluation: best.evaluation, song: song, key: key)
-            }
-            if let best {
-                CoLogger.shared.log("歌词候选弃用：酷狗最佳候选标题不匹配：\(song.name)", level: .debug)
-            } else {
+            if survivors.isEmpty, downloaded.isEmpty {
                 CoLogger.shared.log("歌词候选为空：酷狗 \(candidates.count) 个候选均未取到正文", level: .debug)
             }
         } else {
@@ -244,9 +261,12 @@ actor SherryLyricsService {
                     isWordSynced: doc.isWordSynced
                 )
                 if evaluation.baseTitleMatches {
-                    return accept(document: doc, evaluation: evaluation, song: song, key: key)
+                    if let kept = gated(doc, song: song, durationMs: durationMs) {
+                        survivors.append(kept)
+                    }
+                } else {
+                    CoLogger.shared.log("歌词候选弃用：酷狗备用端点标题不匹配：\(song.name)", level: .debug)
                 }
-                CoLogger.shared.log("歌词候选弃用：酷狗备用端点标题不匹配：\(song.name)", level: .debug)
             }
         }
         // 2) 酷我跨源兜底（LX Music 机制移植）：搜"歌名 歌手" → 数字 rid →
@@ -254,30 +274,41 @@ actor SherryLyricsService {
         if let doc = await SherryKuwoLyrics.fetchLyrics(
             title: song.name, artist: song.artists, durationMs: durationMs
         ), !doc.lines.isEmpty {
-            let evaluation = SherryLyricMatchEvaluation.evaluate(
-                wantedTitle: song.name, wantedArtists: [song.artists],
-                wantedAlbum: song.album.isEmpty ? nil : song.album, wantedDurationMs: durationMs,
-                candidateTitle: doc.title ?? song.name,
-                candidateArtists: doc.artists.isEmpty ? [song.artists] : doc.artists,
-                candidateAlbum: doc.album, candidateDurationMs: doc.durationMs,
-                isWordSynced: doc.isWordSynced
-            )
-            return accept(document: doc, evaluation: evaluation, song: song, key: key)
+            if let kept = gated(doc, song: song, durationMs: durationMs) {
+                survivors.append(kept)
+            }
         }
         // 3) LRCLIB 兜底：/api/get（带/不带专辑）→ /api/search（带/不带歌手）。
         if let doc = await SherryLRCLIB.fetchLyrics(
             title: song.name, artist: song.artists,
             album: song.album.isEmpty ? nil : song.album, durationMs: durationMs
         ), !doc.lines.isEmpty {
+            if let kept = gated(doc, song: song, durationMs: durationMs) {
+                survivors.append(kept)
+            }
+        }
+        // 2.2.4 收尾：多源排序 + 固定偏移三角测量；无源通过时诚实降级
+        // （无歌词），绝不放错版/片段歌词。
+        if !survivors.isEmpty {
+            let result = SherryLyricsMatcher.triangulate(documents: survivors, audioDurationMs: durationMs)
+            if let outlier = result.outlier {
+                CoLogger.shared.log(
+                    "歌词三角测量：\(song.name) 离群源=\(outlier.source.rawValue) 修正=\(result.appliedOffsetSeconds.map { String(format: "%+.2fs", $0) } ?? "换源") 选用=\(result.chosen.source.rawValue)",
+                    level: .info
+                )
+            }
             let evaluation = SherryLyricMatchEvaluation.evaluate(
                 wantedTitle: song.name, wantedArtists: [song.artists],
                 wantedAlbum: song.album.isEmpty ? nil : song.album, wantedDurationMs: durationMs,
-                candidateTitle: doc.title ?? song.name,
-                candidateArtists: doc.artists.isEmpty ? [song.artists] : doc.artists,
-                candidateAlbum: doc.album, candidateDurationMs: doc.durationMs,
-                isWordSynced: doc.isWordSynced
+                candidateTitle: result.chosen.title ?? song.name,
+                candidateArtists: result.chosen.artists.isEmpty ? [song.artists] : result.chosen.artists,
+                candidateAlbum: result.chosen.album, candidateDurationMs: result.chosen.durationMs,
+                isWordSynced: result.chosen.isWordSynced
             )
-            return accept(document: doc, evaluation: evaluation, song: song, key: key)
+            return accept(
+                document: result.chosen, evaluation: evaluation, song: song, key: key,
+                cacheable: result.appliedOffsetSeconds == nil
+            )
         }
         // 4) 全部源都无结果：只写 5 分钟负缓存（P0-2 + 限流语义 D）。
         // 搜不到任何候选（限流 / 超时 / 断网）是暂时失败；候选下载后被
@@ -292,13 +323,29 @@ actor SherryLyricsService {
         return []
     }
 
+    /// 拒收门：不过门的文档记日志后丢弃，调用方继续下一源（2.2.4）。
+    private func gated(_ document: SherryLyricDocument, song: Song, durationMs: Int?) -> SherryLyricDocument? {
+        if let reason = SherryLyricsMatcher.rejectionReason(for: document, audioDurationMs: durationMs) {
+            CoLogger.shared.log("歌词拒收：\(song.name) 来源=\(document.source.rawValue) \(reason)", level: .info)
+            return nil
+        }
+        return document
+    }
+
     private func accept(
         document: SherryLyricDocument,
         evaluation: SherryLyricMatchEvaluation,
         song: Song,
-        key: String
+        key: String,
+        cacheable: Bool = true
     ) -> [LyricLine] {
-        cache.store(document: document, key: key, identityKey: song.identityKey)
+        if cacheable {
+            cache.store(document: document, key: key, identityKey: song.identityKey)
+        } else {
+            // 三角测量平移过的文档不写磁盘缓存：缓存存的是源文件原文，
+            // 重载会回到未修正的时间；下次播放重新比对、重新修正。
+            CoLogger.shared.log("歌词已选（不写缓存，平移修正仅本次生效）：\(song.name) 来源=\(document.source.rawValue)", level: .info)
+        }
         CoLogger.shared.log(
             "歌词已选：\(song.name) 来源=\(document.source.rawValue) 标题匹配=\(evaluation.titleMatches ? "是" : "否") 歌手匹配=\(evaluation.artistsMatch ? "是" : "否") 时长差=\(evaluation.durationErrorMs == .max ? -1 : evaluation.durationErrorMs)ms 逐字=\(evaluation.isWordSynced ? "是" : "否") 行数=\(document.lines.count)",
             level: .info

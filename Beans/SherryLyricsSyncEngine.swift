@@ -38,6 +38,9 @@ final class SherryLyricsSyncEngine {
     private var stalled = false
     private var timer: Timer?
     private var boundaryTask: Task<Void, Never>?
+    /// 上次真正发出过的滴答位置：暂停/卡顿期间位置冻住，重复发同一
+    /// 位置只会让 @Published 空转刷新 —— 冻住时跳过（2.2.4）。
+    private var lastTickedPosition: Double?
 
     /// 换歌时重置：旧锚点、旧歌词、旧定时器全部丢弃。
     func reset() {
@@ -45,6 +48,7 @@ final class SherryLyricsSyncEngine {
         hasAnchor = false
         anchorIsPlaying = false
         stalled = false
+        lastTickedPosition = nil
         stopTicking()
     }
 
@@ -64,6 +68,11 @@ final class SherryLyricsSyncEngine {
     /// 采用一次新的播放器位置报告（由 0.05s 观察者调用）。
     /// 每次回调都重锚：观察者报的就是音频时钟的真实位置，重锚不会引入
     /// 漂移，只会把墙钟外推的微小误差清掉；>2s 的跳变当作 seek，立即滴答。
+    /// 2.2.4：卡顿标志只在音频真正前进时才清除 —— 旧版每次回调都无条件
+    /// stalled=false，缓冲期间观察者照常回调，歌词就跑到冻住的音频前面
+    /// （PlayerManager.swift:1151 置位、这里 :83 清除）；现在位置没动
+    /// 就保持冻结，等音频恢复前进再解冻（PlayerManager 在
+    /// timeControlStatus 变回 playing 时也会显式清一次，双保险）。
     func apply(position: Double, isPlaying: Bool, duration: Double, rate: Double = 1) {
         let wasAnchored = hasAnchor
         let wasPlaying = anchorIsPlaying
@@ -74,13 +83,18 @@ final class SherryLyricsSyncEngine {
         } else {
             jump = true
         }
+        // 2.2.4 (iv)：定时器是稳态滴答的唯一来源，死了就悄悄停摆；
+        // 播放中收到观察者回调却发现定时器已死，立刻重建（暂停时不重建，
+        // 暂停靠 stopTicking 停表，apply 不应把它复活）。
+        let moved = wasAnchored && abs(position - anchorPosition) > 0.001
         anchorPosition = position
         anchorDate = Date()
         anchorRate = rate > 0 ? rate : 1
         anchorIsPlaying = isPlaying
         anchorDuration = duration
         hasAnchor = true
-        stalled = false
+        if moved { stalled = false }
+        if isPlaying, timer == nil { startTicking() }
         if jump || !wasAnchored || wasPlaying != isPlaying {
             tick()
         }
@@ -88,9 +102,13 @@ final class SherryLyricsSyncEngine {
 
     func startTicking() {
         stopTicking()
-        timer = Timer.scheduledTimer(withTimeInterval: Self.tickInterval, repeats: true) { [weak self] _ in
+        // 2.2.4 (iii)：默认 runloop mode 下拖动歌词 ScrollView 时定时器
+        // 停摆，歌词跟着冻住；改走 .common mode，滚动时照常滴答。
+        let timer = Timer(timeInterval: Self.tickInterval, repeats: true) { [weak self] _ in
             self?.tick()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
         tick()
     }
 
@@ -106,6 +124,12 @@ final class SherryLyricsSyncEngine {
         boundaryTask = nil
         guard hasAnchor else { return }
         let pos = extrapolatedPosition(at: Date())
+        if let last = lastTickedPosition, abs(last - pos) <= 0.001 {
+            // 位置冻住（暂停/卡顿）：不再重复发同一位置；下一行切换
+            // 也不会来，因为 playing 才排 boundary（见下）。
+            if !anchorIsPlaying || stalled { return }
+        }
+        lastTickedPosition = pos
         onTick?(pos)
         // 在下一行切换时刻本身再滴答一次，不等下一个 250ms 周期。
         if anchorIsPlaying, !stalled, let nextSwitch = nextLineSwitch(after: pos) {

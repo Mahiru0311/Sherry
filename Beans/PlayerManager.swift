@@ -1144,6 +1144,11 @@ final class PlayerManager: NSObject, ObservableObject {
                     self.isPlaying = true
                     self.startListeningSegment()
                 }
+                // 2.2.4 (i)：回到 playing 即音频在前进，卡顿冻结解除；
+                // apply() 里只认“位置前进”也会清，这里是显式双保险。
+                if player.timeControlStatus == .playing {
+                    self.lyricsSyncEngine.setStalled(false)
+                }
                 if player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
                     self.isBuffering = true
                     // 歌词时钟冻结：音频等数据时墙钟外推会让歌词跑到音频前面
@@ -1209,25 +1214,10 @@ final class PlayerManager: NSObject, ObservableObject {
                 pendingResumeSeek = resumeAt
             }
         }
-        guard autoplay else {
-            isBuffering = false
-            refreshNowPlayingOwnership()
-            return
-        }
-        player.playImmediately(atRate: Float(rate))
-        isPlaying = true
-        startListeningSegment()
-        isBuffering = false
+        // 2.2.4 (ii)：观察者与歌词滴答必须在 autoplay 判断之前装好 ——
+        // 暂停时 retryCurrent 走 autoplay:false，旧版在这里直接 return，
+        // 观察者没装、滴答没起，恢复播放后歌词与进度条一起冻住。
         lyricsSyncEngine.startTicking()
-        startAudioSessionWatchdogIfNeeded()
-        // 播放次数：原先在 loadCurrent 里预计数，URL 加载失败/手动重试也会 +1，
-        // 导致统计异常；改为真正开始播放时计数。同一 load 只计一次（失败重载会换
-        // loadGeneration，失败那次本来就没计过，不会重复计）；点同一首歌重播、
-        // 切歌再回来都会走新的 load，都会重新计——不再是“同一首歌计过一次就卡住”。
-        if let song = currentSong, countedLoadGeneration != loadGeneration {
-            bumpPlayCount(song)
-            countedLoadGeneration = loadGeneration
-        }
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.05, preferredTimescale: 600), queue: .main) { [weak self] time in
             guard let self, let player = self.player else { return }
             if time.seconds.isFinite {
@@ -1277,6 +1267,24 @@ final class PlayerManager: NSObject, ObservableObject {
             if waiting != self.isBuffering {
                 self.isBuffering = waiting
             }
+        }
+        guard autoplay else {
+            isBuffering = false
+            refreshNowPlayingOwnership()
+            return
+        }
+        player.playImmediately(atRate: Float(rate))
+        isPlaying = true
+        startListeningSegment()
+        isBuffering = false
+        startAudioSessionWatchdogIfNeeded()
+        // 播放次数：原先在 loadCurrent 里预计数，URL 加载失败/手动重试也会 +1，
+        // 导致统计异常；改为真正开始播放时计数。同一 load 只计一次（失败重载会换
+        // loadGeneration，失败那次本来就没计过，不会重复计）；点同一首歌重播、
+        // 切歌再回来都会走新的 load，都会重新计——不再是“同一首歌计过一次就卡住”。
+        if let song = currentSong, countedLoadGeneration != loadGeneration {
+            bumpPlayCount(song)
+            countedLoadGeneration = loadGeneration
         }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
             guard let self else { return }

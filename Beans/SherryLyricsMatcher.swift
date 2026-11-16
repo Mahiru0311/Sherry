@@ -83,6 +83,174 @@ enum SherryLyricsMatcher {
     static let perfectDurationToleranceMs = 3000
     static let durationBucketMs = 5000
 
+    // MARK: - 2.2.4 时长 / 覆盖率拒收门
+    //
+    // 探针结论（2026-11-16，/tmp/sherry224-bulk/results5_final.json）：
+    // 健康歌的歌词覆盖率（末行时间 / 音频时长）最低 80.5%（海阔天空
+    // 257.5/320s），起风了 83%、稻香 85%；错版歌词 慌啥子嘛 165/260s
+    // = 63.5%，消愁片段 87/294s = 29.6%。门槛取 75%，两边都有余量。
+    // 时长误差门要宽松：酷狗候选 duration 是该版本的时长，不同剪辑版
+    // 本来就差一截（稻香 203s 候选 vs 223s 音频，覆盖率 85% 是对的），
+    // 只拦误差 > max(30s, 音频 25%) 的；duration 为 0 / 缺失 = 未知，
+    // 不拦（只靠覆盖率门）。
+    static let minCoverageRatio = 0.75
+    static let maxCoverageRatio = 1.20
+    static let minLyricLines = 5
+
+    /// 歌词覆盖率 = 最晚一行时间 / 音频时长；音频时长未知时返回 nil（不判）。
+    static func coverageRatio(lines: [LyricLine], audioDurationMs: Int?) -> Double? {
+        guard let audio = audioDurationMs, audio > 0,
+              let last = lines.map(\.time).max() else { return nil }
+        return last * 1000.0 / Double(audio)
+    }
+
+    static func coverageRatio(of document: SherryLyricDocument, audioDurationMs: Int?) -> Double? {
+        coverageRatio(lines: document.lines, audioDurationMs: audioDurationMs)
+    }
+
+    /// 只看行时间与音频时长的覆盖率拒收（缓存复检用，不需要文档元数据）。
+    static func coverageRejects(lines: [LyricLine], audioDurationMs: Int?) -> Bool {
+        guard let ratio = coverageRatio(lines: lines, audioDurationMs: audioDurationMs) else { return false }
+        return ratio < minCoverageRatio || ratio > maxCoverageRatio
+    }
+
+    /// 拒收原因；nil = 通过。durationMs <= 0 当作未知，不参与时长门。
+    static func rejectionReason(for document: SherryLyricDocument, audioDurationMs: Int?) -> String? {
+        if document.lines.isEmpty { return "0 行" }
+        if document.lines.count < minLyricLines {
+            return "行数过少（\(document.lines.count) 行 < \(minLyricLines) 行）"
+        }
+        if let audio = audioDurationMs, audio > 0 {
+            if let ratio = coverageRatio(of: document, audioDurationMs: audio) {
+                if ratio < minCoverageRatio {
+                    return String(format: "覆盖率过低（%.0f%% < %.0f%%，末行 %.1fs / 音频 %.1fs）",
+                                  ratio * 100, minCoverageRatio * 100,
+                                  (document.lines.map(\.time).max() ?? 0), Double(audio) / 1000.0)
+                }
+                if ratio > maxCoverageRatio {
+                    return String(format: "覆盖率过高（%.0f%% > %.0f%%，歌词比音频长太多）",
+                                  ratio * 100, maxCoverageRatio * 100)
+                }
+            }
+            if let docDuration = document.durationMs, docDuration > 0 {
+                let error = abs(docDuration - audio)
+                let threshold = max(30_000, audio / 4)
+                if error > threshold {
+                    return "版本时长差过大（歌词 \(docDuration / 1000)s / 音频 \(audio / 1000)s，差 \(error / 1000)s > \(threshold / 1000)s）"
+                }
+            }
+        }
+        return nil
+    }
+
+    // MARK: - 2.2.4 跨源固定偏移三角测量
+    //
+    // 探针结论：源间偏移是按歌固定的常数、几乎无漂移（小幸运酷我 −3.1s、
+    // 稻香酷狗 −4.2s、海阔天空 −1.2s、晴天 +0.4s、起风了 −0.3s），是
+    // 不同剪辑版（前奏长度不同），不是时钟漂移。只在至少 3 个源都
+    // 通过拒收门、且其中两个源互相认同（中位偏移 ≤1.0s）、第三个源
+    // 相对两个源同向偏离 >2.0s 时，才认定第三个源是离群者；否则不动。
+    // 2 个源时无法判断谁错，保守不动。
+    static let triangulationAgreementSeconds = 1.0
+    static let triangulationOutlierSeconds = 2.0
+    static let triangulationMinMatchedLines = 4
+
+    struct Triangulation {
+        let chosen: SherryLyricDocument
+        /// 离群源（nil = 无离群者，首选文档未动）。
+        let outlier: SherryLyricDocument?
+        /// 对离群文档实际施加的修正（秒，>0 = 往后推）；换源时为 nil。
+        let appliedOffsetSeconds: Double?
+    }
+
+    /// 跨源排序：逐字优先 → 覆盖率（封顶 1.0）→ 源优先级（酷狗 > 酷我 >
+    /// LRCLIB）→ 时长误差。只排已通过拒收门的文档。
+    static func ranked(documents: [SherryLyricDocument], audioDurationMs: Int?) -> [SherryLyricDocument] {
+        let sourcePriority: [SherryLyricDocument.Source: Int] = [.kugou: 0, .kuwo: 1, .lrclib: 2]
+        return documents.sorted { lhs, rhs in
+            if lhs.isWordSynced != rhs.isWordSynced { return lhs.isWordSynced }
+            let lhsCoverage = min(coverageRatio(of: lhs, audioDurationMs: audioDurationMs) ?? 0, 1.0)
+            let rhsCoverage = min(coverageRatio(of: rhs, audioDurationMs: audioDurationMs) ?? 0, 1.0)
+            if abs(lhsCoverage - rhsCoverage) > 0.001 { return lhsCoverage > rhsCoverage }
+            if sourcePriority[lhs.source] != sourcePriority[rhs.source] {
+                return (sourcePriority[lhs.source] ?? 99) < (sourcePriority[rhs.source] ?? 99)
+            }
+            let lhsError = durationError(of: lhs, audioDurationMs: audioDurationMs)
+            let rhsError = durationError(of: rhs, audioDurationMs: audioDurationMs)
+            return lhsError < rhsError
+        }
+    }
+
+    private static func durationError(of document: SherryLyricDocument, audioDurationMs: Int?) -> Int {
+        guard let doc = document.durationMs, doc > 0, let audio = audioDurationMs, audio > 0 else { return .max }
+        return abs(doc - audio)
+    }
+
+    /// 两份文档同名行的中位时间差（A − B，秒）；配对行 <4 行时返回 nil。
+    /// 同名行按出现顺序配对（副歌重复行不跨段错配）。
+    static func medianOffsetSeconds(between a: SherryLyricDocument, and b: SherryLyricDocument) -> Double? {
+        var aByText: [String: [Double]] = [:]
+        var bByText: [String: [Double]] = [:]
+        for line in a.lines { aByText[normalizedLineText(line.text), default: []].append(line.time) }
+        for line in b.lines { bByText[normalizedLineText(line.text), default: []].append(line.time) }
+        var diffs: [Double] = []
+        for (text, aTimes) in aByText {
+            guard let bTimes = bByText[text] else { continue }
+            for (aTime, bTime) in zip(aTimes, bTimes) { diffs.append(aTime - bTime) }
+        }
+        guard diffs.count >= triangulationMinMatchedLines else { return nil }
+        let sorted = diffs.sorted()
+        let mid = sorted.count / 2
+        return sorted.count.isMultiple(of: 2)
+            ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
+    }
+
+    private static func normalizedLineText(_ text: String) -> String {
+        text.lowercased()
+            .filter { !$0.isWhitespace && !$0.isPunctuation }
+    }
+
+    /// 三角测量：返回最终选用的文档。离群者是首选时，若有带逐字的共识
+    /// 文档就换源；若共识文档只有行级、离群者带逐字，则把离群者的行与
+    /// 词整体平移修正量后保留（逐字不丢）；其他情况不动。
+    static func triangulate(documents: [SherryLyricDocument], audioDurationMs: Int?) -> Triangulation {
+        let ordered = ranked(documents: documents, audioDurationMs: audioDurationMs)
+        guard let winner = ordered.first else {
+            fatalError("triangulate called with no documents")
+        }
+        guard documents.count >= 3 else { return Triangulation(chosen: winner, outlier: nil, appliedOffsetSeconds: nil) }
+        // 每源最多一份文档：按下标取“其余两份”，不靠 source/title 比对。
+        for outlierIndex in documents.indices {
+            let outlier = documents[outlierIndex]
+            let others = documents.enumerated().filter { $0.offset != outlierIndex }.map(\.element)
+            guard others.count >= 2 else { continue }
+            let first = others[0], second = others[1]
+            guard let consensus = medianOffsetSeconds(between: first, and: second),
+                  abs(consensus) <= triangulationAgreementSeconds,
+                  let offFirst = medianOffsetSeconds(between: outlier, and: first),
+                  let offSecond = medianOffsetSeconds(between: outlier, and: second),
+                  abs(offFirst) > triangulationOutlierSeconds,
+                  abs(offSecond) > triangulationOutlierSeconds,
+                  (offFirst > 0) == (offSecond > 0) else { continue }
+            // 离群者确认：只有首选是离群者时才换/修；否则首选本来就对。
+            guard documents.firstIndex(of: winner) == outlierIndex else {
+                return Triangulation(chosen: winner, outlier: outlier, appliedOffsetSeconds: nil)
+            }
+            let consensusDocs = others
+            if let bestConsensus = ranked(documents: consensusDocs, audioDurationMs: audioDurationMs).first,
+               bestConsensus.isWordSynced {
+                return Triangulation(chosen: bestConsensus, outlier: outlier, appliedOffsetSeconds: nil)
+            }
+            // 共识只有行级：平移离群者的逐字文档，保留逐字时间。
+            let correction = -(offFirst + offSecond) / 2
+            return Triangulation(
+                chosen: outlier.shifted(by: correction),
+                outlier: outlier, appliedOffsetSeconds: correction
+            )
+        }
+        return Triangulation(chosen: winner, outlier: nil, appliedOffsetSeconds: nil)
+    }
+
     // MARK: - 归一化
 
     static func normalizeTitle(_ raw: String) -> String {
