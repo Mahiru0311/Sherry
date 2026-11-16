@@ -170,6 +170,27 @@ enum SherryKugouLyrics {
     }
 
     /// 搜索候选（只含元数据，不下载正文）。调用方按字典序排序后只取前 3 个下正文。
+    /// 2.2.6 F2(a)：尝试表抽成纯函数（供单测）—— 时长未知（durationMs == nil）
+    /// 时所有尝试都不带 duration 参数，绝不拿假时长去搜；时长已知时前两次
+    /// 尝试带时长（酷狗排名完全由 duration 参数决定，带时长才返回全版）。
+    static func searchAttempts(
+        title: String,
+        artists: [String],
+        durationMs: Int?
+    ) -> [(keyword: String, duration: Int?)] {
+        // 只取第一位歌手（song.artists 可能是 "A|B" 的拼接串）。
+        let firstArtist = artists.flatMap { $0.split(separator: "|").map(String.init) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
+        let titleAndArtist = firstArtist.map { "\(title) \($0)" }
+        var attempts: [(keyword: String, duration: Int?)] = []
+        if let titleAndArtist { attempts.append((titleAndArtist, durationMs)) }
+        attempts.append((title, durationMs))
+        attempts.append((title, nil))
+        if let titleAndArtist { attempts.append((titleAndArtist, nil)) }
+        return attempts
+    }
+
     static func search(
         title: String,
         artists: [String],
@@ -181,16 +202,9 @@ enum SherryKugouLyrics {
         // 2.2.1 删掉的第三次尝试正是回归根因，恢复并提到第一位。
         // 顺序：歌名+歌手+时长 → 歌名+时长 → 歌名 → 歌名+歌手；
         // 一组出候选就停，最多 4 次，不烧限流配额。
-        // 只取第一位歌手（song.artists 可能是 "A|B" 的拼接串）。
-        let firstArtist = artists.flatMap { $0.split(separator: "|").map(String.init) }
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first(where: { !$0.isEmpty })
-        let titleAndArtist = firstArtist.map { "\(title) \($0)" }
-        var attempts: [(keyword: String, duration: Int?)] = []
-        if let titleAndArtist { attempts.append((titleAndArtist, durationMs)) }
-        attempts.append((title, durationMs))
-        attempts.append((title, nil))
-        if let titleAndArtist { attempts.append((titleAndArtist, nil)) }
+        // 2.2.6：首轮候选全被拒收时，Service 会再调一次 durationMs: nil
+        // 的搜索补试剩余组合（见 SherryLyricsService.fetchAndCache F2(b)）。
+        let attempts = searchAttempts(title: title, artists: artists, durationMs: durationMs)
         var seen: Set<String> = []
         var out: [Candidate] = []
         for attempt in attempts {

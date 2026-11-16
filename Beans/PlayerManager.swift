@@ -173,7 +173,10 @@ final class PlayerManager: NSObject, ObservableObject {
     private var lastPublishedProgress: Double = -1
     private var lastPersistedProgress: Double = -1
     // 滑动进行中的目标位置：观察员在播放器落点前不许用旧时间把进度打回去。
-    private var pendingSeekTarget: Double?
+    // internal：单测断言 seek 收尾（completeSeek）放开标志位（2.2.6 F4）。
+    var pendingSeekTarget: Double?
+    /// 2.2.6 F2(c)：已为哪首歌做过“时长就绪后重抓歌词”（每首歌一次，切歌时清零）。
+    private var lyricsDurationRetryKey: String?
     private var pendingSeekSetUptime: Double = 0
     private var pendingListeningDuration: TimeInterval = 0
     /// 单调时钟记录当前实际播放片段，不依赖歌曲进度，避免拖动/切歌放大统计。
@@ -476,18 +479,26 @@ final class PlayerManager: NSObject, ObservableObject {
             toleranceBefore: CMTime(seconds: 0.25, preferredTimescale: 600),
             toleranceAfter: CMTime(seconds: 0.25, preferredTimescale: 600)
         ) { [weak self] finished in
-            guard finished else { return }
             DispatchQueue.main.async { [weak self] in
-                // 只有这笔 seek 仍是最新的一笔才重锚：连续拖动时旧的
-                // completion 绝不能把引擎拉回已经作废的目标。
-                guard let self,
-                      self.currentSong?.identityKey == seekSongKey,
-                      self.seekRevision == revision else { return }
-                self.lyricsSyncEngine.apply(position: clamped, isPlaying: self.isPlaying, duration: self.duration, rate: self.rate)
+                self?.completeSeek(finished: finished, revision: revision, seekSongKey: seekSongKey, clamped: clamped)
             }
         }
         updateNowPlaying()
         savePersistedPlaybackState()
+    }
+
+    /// 2.2.6 F4：seek(to:) 落点收尾（与 seekPrecisely 对齐；可单测）。
+    /// 顺序是关键：先做 revision/切歌 guard（被新 seek 顶掉的旧 completion
+    /// 绝不能误清新目标），再清 pendingSeekTarget，最后按 finished 决定
+    /// 是否重锚 —— finished == false 的最新一笔也要放开标志位，否则
+    /// 0.05s 观察者在长期 buffering（waitingToPlayAtSpecifiedRate 且离目标
+    /// > 0.5s）时一直跳过喂入，进度条冻在目标、歌词时钟失去重锚纠正。
+    func completeSeek(finished: Bool, revision: Int, seekSongKey: String?, clamped: Double) {
+        guard currentSong?.identityKey == seekSongKey,
+              seekRevision == revision else { return }
+        pendingSeekTarget = nil
+        guard finished else { return }
+        lyricsSyncEngine.apply(position: clamped, isPlaying: isPlaying, duration: duration, rate: rate)
     }
 
     /// 歌词点击专用的精确跳转。
@@ -511,14 +522,17 @@ final class PlayerManager: NSObject, ObservableObject {
             toleranceBefore: CMTime(seconds: 0.25, preferredTimescale: 600),
             toleranceAfter: CMTime(seconds: 0.25, preferredTimescale: 600)
         ) { [weak self] finished in
-            guard finished else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self,
                       self.currentSong?.identityKey == seekSongKey,
                       self.seekRevision == revision else { return }
+                // 2.2.6 F4：与 seek(to:) 的 completeSeek 同款 —— finished == false
+                // 的最新一笔也要先放开 pendingSeekTarget，否则观察者一直跳过
+                // 喂入；落点后的恢复播放/重锚仍只在 finished 时做。
+                self.pendingSeekTarget = nil
+                guard finished else { return }
                 self.progress = target
                 self.lastPublishedProgress = target
-                self.pendingSeekTarget = nil
                 if shouldKeepPlaying {
                     self.player?.playImmediately(atRate: Float(self.rate))
                     self.isPlaying = true
@@ -818,6 +832,7 @@ final class PlayerManager: NSObject, ObservableObject {
         flushListeningDuration()
         resetListeningProgress()
         pendingSeekTarget = nil
+        lyricsDurationRetryKey = nil
         // ABR 恢复结算：切到新歌时，用上一首的卡顿情况记一次无卡顿歌数，
         // 满足条件就把偏好恢复到降档前那一档（新歌按恢复后的档位取地址）。
         if abrLoadedSongKey != nil, abrLoadedSongKey != song.identityKey {
@@ -941,6 +956,34 @@ final class PlayerManager: NSObject, ObservableObject {
             guard generation == self.loadGeneration, !lines.isEmpty else { return }
             self.lyricsSyncEngine.setLyrics(lines)
             self.lyricRevision += 1
+        }
+    }
+
+    /// 2.2.6 F2(c)：音频真实时长刚就绪、而当前歌的元数据时长未知时重抓歌词。
+    /// loadCurrent 抓歌词时 song.duration 未知 → 酷狗只返回短版碎片、全被
+    /// 拒收门拦掉；时长就绪后用补全时长的歌重抓一次（identityKey 不变，
+    /// 缓存键随 5s 时长桶变化，旧的未知时长负缓存拦不住这次重抓）。
+    /// 队列里的歌先补全时长，之后 loadLyrics / 缓存键 / 预取都用真实时长；
+    /// 抓到歌词才喂引擎并 bump lyricRevision，PlayerView 从缓存刷新。
+    /// 每首歌只触发一次；引擎已有歌词时不触发（酷我/LRCLIB 可能已顶上）。
+    private func retryLyricsWithKnownDuration(song: Song, duration: Double) {
+        let key = song.identityKey
+        guard lyricsDurationRetryKey != key else { return }
+        lyricsDurationRetryKey = key
+        let updated = song.withDuration(duration)
+        if queue.indices.contains(currentIndex), queue[currentIndex].identityKey == key {
+            queue[currentIndex] = updated
+            savePersistedPlaybackState()
+        }
+        CoLogger.shared.log("歌词时长补全重抓：\(song.name) 时长=\(Int((duration * 1000).rounded()))ms", level: .info)
+        Task { [weak self] in
+            guard let self else { return }
+            let lines = await SherryLyricsService.shared.lyrics(for: updated)
+            await MainActor.run {
+                guard self.currentSong?.identityKey == key, !lines.isEmpty else { return }
+                self.lyricsSyncEngine.setLyrics(lines)
+                self.lyricRevision += 1
+            }
         }
     }
 
@@ -1274,7 +1317,14 @@ final class PlayerManager: NSObject, ObservableObject {
             if let itemDuration = player.currentItem?.duration, itemDuration.isNumeric {
                 let seconds = itemDuration.seconds
                 if seconds.isFinite, abs(seconds - self.duration) > 0.25 {
+                    // 2.2.6 F2(c)：真实时长第一次就绪、而歌的元数据时长未知时，
+                    // 之前用未知时长抓的歌词可能拿的是碎片/失败，重抓一次。
+                    let wasUnknown = self.duration <= 0
                     self.duration = seconds
+                    if wasUnknown, seconds > 0, let song = self.currentSong,
+                       song.duration <= 0, self.lyricsSyncEngine.lines.isEmpty {
+                        self.retryLyricsWithKnownDuration(song: song, duration: seconds)
+                    }
                 }
             }
             // 歌词时钟锚点：0.05s 观察者每次报位置都喂给同步引擎（每次回调

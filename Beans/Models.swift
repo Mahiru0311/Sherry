@@ -123,6 +123,16 @@ struct Song: Identifiable, Hashable, Codable {
         }
     }
 
+    /// 2.2.6 F2(c)：只换时长、其余字段原样复制（identityKey 不变）。
+    /// 音频真实时长就绪后，用补全时长的歌重抓歌词、刷新缓存键。
+    func withDuration(_ duration: TimeInterval) -> Song {
+        Song(id: id, name: name, artists: artists, album: album, coverURL: coverURL,
+             duration: duration, source: source, kugouHash: kugouHash,
+             kugouAlbumAudioId: kugouAlbumAudioId, kugouAlbumId: kugouAlbumId,
+             kugouQualityHashes: kugouQualityHashes, miguLyricURL: miguLyricURL,
+             qishuiID: qishuiID, bilibiliID: bilibiliID, fee: fee)
+    }
+
     /// 是否为 VIP / 付费歌曲（用于列表与播放器角标）
     /// 网易云 fee：0 免费、1 VIP、4 付费单曲；8 为翻唱/免费资源，不视为 VIP
     /// QQ payplay：0 免费，非 0 需要会员/付费
